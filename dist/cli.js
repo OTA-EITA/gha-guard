@@ -7367,6 +7367,8 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 // src/report.ts
@@ -7995,7 +7997,7 @@ async function scan(paths, opts) {
 }
 
 // src/cli.ts
-var version = true ? "0.1.0" : "dev";
+var version = true ? "0.1.1" : "dev";
 var usage = `usage: gha-guard [options] [path ...]
 
 Lints GitHub Actions workflows and composite actions for security problems.
@@ -8072,7 +8074,15 @@ ${usage}`);
   const threshold = severityRank[failOn];
   return result.findings.some((f) => severityRank[f.severity] >= threshold) ? 1 : 0;
 }
-if (process.argv[1] && /cli\.(js|ts)$/.test(process.argv[1]) && !process.env.VITEST) {
+function isEntryPoint(argv1, moduleUrl) {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   main(process.argv.slice(2), {
     stdout: (s) => process.stdout.write(s),
     stderr: (s) => process.stderr.write(s),
@@ -8089,5 +8099,6 @@ if (process.argv[1] && /cli\.(js|ts)$/.test(process.argv[1]) && !process.env.VIT
   );
 }
 export {
+  isEntryPoint,
   main
 };
