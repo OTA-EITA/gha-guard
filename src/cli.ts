@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { formats, render } from "./report.js";
 import type { Format } from "./report.js";
@@ -88,8 +90,20 @@ export async function main(argv: string[], io: Io): Promise<number> {
   return result.findings.some((f) => severityRank[f.severity] >= threshold) ? 1 : 0;
 }
 
-// Run when executed directly (the bundled dist/cli.js), not when imported by tests.
-if (process.argv[1] && /cli\.(js|ts)$/.test(process.argv[1]) && !process.env.VITEST) {
+/**
+ * Reports whether this module is the program being run. npm installs the CLI
+ * behind a symlink (node_modules/.bin/gha-guard), so resolve it before comparing.
+ */
+export function isEntryPoint(argv1: string | undefined, moduleUrl: string): boolean {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   main(process.argv.slice(2), {
     stdout: (s) => process.stdout.write(s),
     stderr: (s) => process.stderr.write(s),
