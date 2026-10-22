@@ -7997,7 +7997,7 @@ async function scan(paths, opts) {
 }
 
 // src/cli.ts
-var version = true ? "0.1.1" : "dev";
+var version = true ? "0.1.2" : "dev";
 var usage = `usage: gha-guard [options] [path ...]
 
 Lints GitHub Actions workflows and composite actions for security problems.
