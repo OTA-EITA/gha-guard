@@ -1,0 +1,4 @@
+node_modules/
+coverage/
+*.sarif
+.DS_Store
