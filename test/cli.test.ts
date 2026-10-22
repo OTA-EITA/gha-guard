@@ -76,3 +76,19 @@ describe("discovery", () => {
     expect(files.some((f) => f.includes("fixtures"))).toBe(false);
   });
 });
+
+describe("isEntryPoint", () => {
+  it("resolves symlinks such as node_modules/.bin/gha-guard", async () => {
+    const { isEntryPoint } = await import("../src/cli.js");
+    const { symlinkSync } = await import("node:fs");
+    const dir = mkdtempSync(path.join(tmpdir(), "gha-guard-bin-"));
+    const target = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+    const link = path.join(dir, "gha-guard");
+    symlinkSync(target, link);
+    const url = new URL("../src/cli.ts", import.meta.url).href;
+    expect(isEntryPoint(link, url)).toBe(true);
+    expect(isEntryPoint(target, url)).toBe(true);
+    expect(isEntryPoint(path.join(dir, "other"), url)).toBe(false);
+    expect(isEntryPoint(undefined, url)).toBe(false);
+  });
+});
