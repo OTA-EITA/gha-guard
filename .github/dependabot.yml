@@ -5,6 +5,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Only propose versions that have been public for a week, so hijacked
+    # releases are usually pulled before they reach this repository.
+    cooldown:
+      default-days: 7
+    # Major versions are upgraded by hand: TypeScript has to stay within what
+    # typescript-eslint supports and @types/node has to match the Node 24 runtime.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         dependency-type: development
