@@ -13,7 +13,7 @@ const requireShim =
 const common = {
   bundle: true,
   platform: "node",
-  target: "node20",
+  target: "node22",
   format: "esm",
   legalComments: "none",
   define: { __VERSION__: JSON.stringify(version) },
