@@ -17,9 +17,14 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 24
+          node-version-file: .nvmrc
+          # Always use the newest 24.x, not the runner's cached (possibly unpatched) Node.
+          check-latest: true
           cache: npm
-      - run: npm ci
+      # Install scripts of dependencies never run; none of them need one.
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=moderate
+      - run: npm audit signatures
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
