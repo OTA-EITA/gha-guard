@@ -1,6 +1,6 @@
 {
   "name": "gha-guard",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Security linter and auto-fixer for GitHub Actions workflows: script injection, pwn requests, excessive permissions and unpinned actions",
   "license": "MIT",
   "author": "OTA-EITA",
