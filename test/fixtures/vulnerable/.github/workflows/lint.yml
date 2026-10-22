@@ -1,0 +1,8 @@
+name: lint
+on: pull_request
+jobs:
+  lint:
+    runs-on: self-hosted
+    steps:
+      - shell: pwsh
+        run: Write-Host "${{ github.event.pull_request.title }}"
