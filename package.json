@@ -1,0 +1,54 @@
+{
+  "name": "gha-guard",
+  "version": "0.1.0",
+  "description": "Security linter and auto-fixer for GitHub Actions workflows: script injection, pwn requests, excessive permissions and unpinned actions",
+  "license": "MIT",
+  "author": "OTA-EITA",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OTA-EITA/gha-guard.git"
+  },
+  "keywords": [
+    "github-actions",
+    "security",
+    "sast",
+    "linter",
+    "supply-chain",
+    "sarif"
+  ],
+  "type": "module",
+  "bin": {
+    "gha-guard": "dist/cli.js"
+  },
+  "files": [
+    "dist/cli.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^3.2.7",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^3.2.7"
+  }
+}
