@@ -1,0 +1,27 @@
+name: gha-guard
+description: Find script injection, pwn requests, excessive permissions and unpinned actions in GitHub Actions workflows
+author: OTA-EITA
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  path:
+    description: Space separated files or directories to scan
+    default: .
+  fail-on:
+    description: Fail on findings at least this severe (high, medium, low or none)
+    default: high
+  sarif-file:
+    description: Where to write the SARIF report
+    default: gha-guard.sarif
+
+outputs:
+  sarif-file:
+    description: Path of the SARIF report, for github/codeql-action/upload-sarif
+  findings:
+    description: Number of findings
+
+runs:
+  using: node24
+  main: dist/action.js
