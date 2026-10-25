@@ -33,8 +33,8 @@ describe("rules", () => {
     ]);
   });
 
-  it("lint.yml: self-hosted runner on pull requests and pwsh injection", () => {
-    expect(check("vulnerable/.github/workflows/lint.yml")).toEqual(["GHA001@8", "GHA003@1", "GHA008@4"]);
+  it("lint.yml: self-hosted runner on pull requests and pwsh injection (low: pull_request only)", () => {
+    expect(check("vulnerable/.github/workflows/lint.yml")).toEqual(["GHA003@1", "GHA008@4", "GHA001@8"]);
   });
 
   it("composite actions are checked for injection but not permissions", () => {
