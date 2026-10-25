@@ -13,9 +13,9 @@ describe("rules", () => {
   it("triage.yml: injection, pwn request, unpinned actions", () => {
     expect(check("vulnerable/.github/workflows/triage.yml")).toEqual([
       "GHA002@10",
-      "GHA001@13",
-      "GHA001@13",
-      "GHA001@17",
+      "GHA001@15",
+      "GHA001@16",
+      "GHA001@20",
       "GHA003@1",
       "GHA005@21", // third-party action: medium
       "GHA005@10", // first-party actions: low
@@ -34,11 +34,39 @@ describe("rules", () => {
   });
 
   it("lint.yml: self-hosted runner on pull requests and pwsh injection", () => {
-    expect(check("vulnerable/.github/workflows/lint.yml")).toEqual(["GHA001@7", "GHA003@1", "GHA008@4"]);
+    expect(check("vulnerable/.github/workflows/lint.yml")).toEqual(["GHA001@8", "GHA003@1", "GHA008@4"]);
   });
 
   it("composite actions are checked for injection but not permissions", () => {
-    expect(check("vulnerable/actions/notify/action.yml")).toEqual(["GHA001@5"]);
+    expect(check("vulnerable/actions/notify/action.yml")).toEqual(["GHA001@6"]);
+  });
+
+  it("GHA001 points at the line and column of each expression, also inside block scalars", () => {
+    const wf = parseWorkflow(
+      "x.yml",
+      [
+        "on: issues",
+        "permissions: {}",
+        "jobs:",
+        "  a:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: |",
+        "          echo start",
+        '          echo "${{ github.event.issue.title }}"',
+        "      - run: >",
+        "          echo",
+        "          ${{ github.event.issue.body }}",
+        "      - uses: actions/github-script@v7",
+        "        with:",
+        "          script: |",
+        "            const a = 1",
+        "            console.log('${{ github.event.issue.title }}')",
+        "",
+      ].join("\n"),
+    );
+    const found = wf ? analyze(wf).filter((f) => f.ruleId === "GHA001") : [];
+    expect(found.map((f) => `${String(f.line)}:${String(f.column)}`)).toEqual(["9:17", "12:11", "17:26"]);
   });
 
   it("a hardened workflow has no findings", () => {
