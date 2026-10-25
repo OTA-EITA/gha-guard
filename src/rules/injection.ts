@@ -1,4 +1,7 @@
-import type { Finding } from "../types.js";
+import { eventsSetting, scenarios } from "../events.js";
+import { exposures, rateScript, settingEvents } from "../exposure.js";
+import type { Context } from "../exposure.js";
+import type { Finding, Severity } from "../types.js";
 import { positionIn } from "../workflow.js";
 import type { Step, Workflow } from "../workflow.js";
 
@@ -70,21 +73,37 @@ export function scripts(step: Step): Script[] {
   return out;
 }
 
-export function checkInjection(wf: Workflow): Finding[] {
+export function checkInjection(wf: Workflow, ctx: Context): Finding[] {
   const findings: Finding[] = [];
+  const events = scenarios(wf);
   for (const job of wf.jobs) {
-    for (const step of job.steps) {
+    job.steps.forEach((step, index) => {
       for (const { text, node, fixable } of scripts(step)) {
         const seen = new Map<string, number>();
         for (const inj of findInjections(text)) {
           const n = seen.get(inj.text) ?? 0;
           seen.set(inj.text, n + 1);
+          const setters = eventsSetting(inj.context);
+          const relevant = settingEvents(events, setters);
+          let severity: Severity;
+          let message = `${inj.context} is interpolated into a script; a crafted value can run arbitrary commands`;
+          if (relevant.length === 0) {
+            // Still worth fixing, but nothing sets the value for these triggers.
+            if (exposures(wf, job, index).length === 0) continue;
+            severity = "low";
+            message = `${inj.context} is interpolated into a script, but it is only set for ${(setters ?? []).join(", ")} events, which do not trigger this workflow`;
+          } else {
+            const rating = rateScript(wf, job, index, relevant, ctx);
+            if (!rating) continue;
+            severity = rating.severity;
+            message += rating.note;
+          }
           findings.push({
             ruleId: "GHA001",
-            severity: "high",
+            severity,
             file: wf.file,
             ...positionIn(wf, node, inj.text, n),
-            message: `${inj.context} is interpolated into a script; a crafted value can run arbitrary commands`,
+            message,
             help: fixable
               ? `Pass it through an environment variable: env: { ${envName(inj.context)}: ${inj.text} } and use "$${envName(inj.context)}" in the script.`
               : "Read it in JavaScript from context.payload instead of interpolating it into the script.",
@@ -92,7 +111,7 @@ export function checkInjection(wf: Workflow): Finding[] {
           });
         }
       }
-    }
+    });
   }
   return findings;
 }
