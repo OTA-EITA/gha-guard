@@ -1,0 +1,10 @@
+name: duplicate key
+on: push
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.repository == 'a/b'
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - run: echo hi
