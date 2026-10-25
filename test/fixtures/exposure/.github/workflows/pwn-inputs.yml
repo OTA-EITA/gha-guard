@@ -1,0 +1,31 @@
+on:
+  pull_request_target:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      edition:
+        type: string
+permissions: {}
+jobs:
+  cypress:
+    if: inputs.edition || contains(github.event.pull_request.labels.*.name, 'run-cypress')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check user authorization
+        run: |
+          if [[ "${{ github.actor }}" != "${{ secrets.ALLOWED_USER }}" ]]; then
+            echo "not allowed"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - run: docker build .
+  open:
+    if: inputs.edition || contains(github.event.pull_request.labels.*.name, 'run-cypress')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - run: docker build .

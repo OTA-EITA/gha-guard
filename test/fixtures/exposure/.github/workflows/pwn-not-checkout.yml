@@ -1,0 +1,24 @@
+on:
+  pull_request_target:
+  workflow_run:
+    workflows: [Nightly]
+    types: [completed]
+permissions: {}
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: poetry install
+      - run: |
+          git fetch origin pull/${{ github.event.pull_request.number }}/head:pr
+          MERGE_BASE=$(git merge-base origin/main pr)
+          git show pr:data.json > data.json
+  rebuild:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: make
