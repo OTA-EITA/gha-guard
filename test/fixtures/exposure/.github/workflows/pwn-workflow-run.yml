@@ -1,0 +1,21 @@
+on:
+  workflow_run:
+    workflows: [Nightly]
+    types: [completed]
+permissions: {}
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - run: bash ci/classify.sh
+  scheduled-only:
+    if: github.event.workflow_run.event == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - run: bash ci/classify.sh

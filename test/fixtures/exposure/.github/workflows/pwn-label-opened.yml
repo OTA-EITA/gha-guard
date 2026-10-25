@@ -1,0 +1,13 @@
+on:
+  pull_request_target:
+    types: [opened]
+permissions: {}
+jobs:
+  build:
+    if: contains(github.event.pull_request.labels.*.name, 'trusted')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: cargo build

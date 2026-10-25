@@ -1,0 +1,13 @@
+on:
+  workflow_run:
+    workflows: ["PR CI"]
+    types: [completed]
+permissions: {}
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - run: bash ci/report.sh

@@ -1,0 +1,38 @@
+on:
+  issue_comment:
+    types: [created]
+permissions: {}
+jobs:
+  test:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh pr checkout ${{ github.event.issue.number }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: npm install && npm test
+  members:
+    if: github.event.issue.pull_request && github.event.comment.author_association == 'MEMBER'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          git fetch origin pull/${{ github.event.issue.number }}/head:pr
+          git checkout pr
+          python setup.py test
+  status:
+    if: github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh pr checkout ${{ github.event.issue.number }}
+      - run: |
+          git status
+          ls
+  fetch-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          git fetch origin pull/${{ github.event.issue.number }}/head:pr-head
+          node scripts/compare.js pr-head

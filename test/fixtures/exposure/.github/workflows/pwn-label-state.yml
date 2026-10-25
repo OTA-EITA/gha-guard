@@ -1,0 +1,21 @@
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  pull_request_target:
+    types: [labeled]
+permissions: {}
+jobs:
+  extra:
+    if: |
+      github.repository == 'org/repo' && (
+        (github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'ok-to-test')) ||
+        github.event_name == 'schedule'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - run: |
+          sudo apt-get update
+          make e2e
