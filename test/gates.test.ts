@@ -173,6 +173,19 @@ describe("jobVerdict", () => {
     expect(kind(job(src, "pull_request_target", "e"))).toBe("gated:actor");
   });
 
+  it("treats inputs as empty for events other than workflow_dispatch and workflow_call", () => {
+    expect(
+      kind(job(jobIf("inputs.deploy", "[pull_request_target, workflow_dispatch]"), "pull_request_target")),
+    ).toBe("never");
+    expect(kind(job(jobIf("github.event.inputs.deploy", "[issues, workflow_dispatch]"), "issues"))).toBe(
+      "never",
+    );
+    expect(
+      kind(job(jobIf("inputs.deploy", "[pull_request_target, workflow_dispatch]"), "workflow_dispatch")),
+    ).toBe("open");
+    expect(kind(job(jobIf("inputs.deploy", "workflow_call"), "*"))).toBe("open");
+  });
+
   it("does not loop on cyclic needs", () => {
     const src =
       "on: issues\njobs:\n  a:\n    needs: b\n    runs-on: x\n    steps: []\n  b:\n    needs: a\n    runs-on: x\n    steps: []\n";
@@ -220,6 +233,20 @@ describe("stepVerdict", () => {
       "      - run: npm ci",
     ]);
     expect(kind(step(script, "issue_comment", 1))).toBe("gated:actor");
+
+    const allowlist = steps([
+      "      - name: Check user",
+      "        run: |",
+      '          if [[ "${{ github.actor }}" != "$ALLOWED" ]]; then exit 1; fi',
+      "      - run: npm ci",
+      "      - run: |",
+      '          echo "${GITHUB_ACTOR}"',
+      "      - run: npm test",
+    ]);
+    expect(kind(step(allowlist, "issue_comment", 1))).toBe("gated:actor");
+    // Printing the actor is not a check.
+    const printing = steps(['      - run: echo "${GITHUB_ACTOR}"', "      - run: npm ci"]);
+    expect(kind(step(printing, "issue_comment", 1))).toBe("open");
 
     // A check that only sets an output does not stop the job by itself.
     const output = steps([
