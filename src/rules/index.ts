@@ -26,7 +26,8 @@ export const rules: Rule[] = [
     id: "GHA002",
     severity: "high",
     title: "Pwn request",
-    description: "pull_request_target or workflow_run checks out and runs pull request code with secrets.",
+    description:
+      "pull_request_target, workflow_run or issue_comment checks out and runs pull request code with secrets.",
   },
   {
     id: "GHA003",
