@@ -126,3 +126,27 @@ describe("GHA002 exposure", () => {
     expect(summary("pwn-workflow-run-pr.yml", "GHA002")).toEqual(["10:high"]);
   });
 });
+
+describe("artifact-derived values in workflow_run workflows", () => {
+  it("flags them in scripts and explains where they come from", () => {
+    expect(summary("artifact-injection.yml", "GHA001")).toEqual(["30:high", "31:high"]);
+    const msg = findings("artifact-injection.yml", "GHA001")[0]?.message ?? "";
+    expect(msg).toContain("needs.download.outputs.pr");
+    expect(msg).toContain("listWorkflowRunArtifacts");
+    expect(msg).toContain("steps.parse.outputs");
+  });
+
+  it("flags checkouts of artifact-derived refs that are then run", () => {
+    expect(summary("artifact-checkout.yml", "GHA002")).toEqual(["37:high"]);
+    const msg = findings("artifact-checkout.yml", "GHA002")[0]?.message ?? "";
+    expect(msg).toContain("needs.context.outputs.repository");
+    expect(msg).toContain("actions/download-artifact");
+    expect(msg).toContain("npm ci");
+    // An artifact of the same run is not attacker-controlled.
+    expect(summary("artifact-checkout.yml", "GHA001")).toEqual([]);
+  });
+
+  it("downgrades artifacts of upstream workflows that only run on trusted events", () => {
+    expect(summary("artifact-nightly.yml", "GHA001")).toEqual(["13:medium"]);
+  });
+});
