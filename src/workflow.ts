@@ -28,6 +28,7 @@ export interface Job {
 export interface Workflow {
   file: string;
   kind: "workflow" | "action";
+  source: string;
   doc: Document;
   lines: LineCounter;
   triggers: string[];
@@ -40,6 +41,30 @@ export interface Workflow {
 export function lineOf(lines: LineCounter, node: Node | null | undefined): number {
   const offset = node?.range?.[0];
   return offset === undefined ? 1 : lines.linePos(offset).line;
+}
+
+export interface Position {
+  line: number;
+  column?: number;
+}
+
+/**
+ * Finds where the n-th occurrence (0-based) of `text` sits inside a scalar's
+ * source. Block scalars (| and >) keep their text verbatim, so an expression
+ * is found on its own line; when it is not (e.g. escaped in a quoted string or
+ * folded across lines), the scalar's first line is returned.
+ */
+export function positionIn(wf: Workflow, node: unknown, text: string, occurrence = 0): Position {
+  if (!isScalar(node) || !node.range) return { line: 1 };
+  const [start, , end] = node.range;
+  const raw = wf.source.slice(start, end);
+  let at = -1;
+  for (let i = 0; i <= occurrence; i++) {
+    at = raw.indexOf(text, at + 1);
+    if (at < 0) return { line: lineOf(wf.lines, node) };
+  }
+  const pos = wf.lines.linePos(start + at);
+  return { line: pos.line, column: pos.col };
 }
 
 function asStringMap(value: unknown): Record<string, string> {
@@ -122,6 +147,7 @@ export function parseWorkflow(file: string, source: string): Workflow | null {
     return {
       file,
       kind: "action",
+      source,
       doc,
       lines,
       triggers: [],
@@ -166,6 +192,7 @@ export function parseWorkflow(file: string, source: string): Workflow | null {
   return {
     file,
     kind: "workflow",
+    source,
     doc,
     lines,
     // "on" can be parsed as the boolean true by YAML 1.1 tools; yaml 2 keeps it as a string.
