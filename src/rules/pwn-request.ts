@@ -1,6 +1,8 @@
 import { stepRunsCode, scriptRunsCode } from "../exec.js";
 import { exposures, withEnvironment, withUpstream, worst } from "../exposure.js";
 import type { Context, Rating } from "../exposure.js";
+import { artifactTaint } from "../taint.js";
+import type { Taint } from "../taint.js";
 import type { Finding } from "../types.js";
 import type { Job, Step, Workflow } from "../workflow.js";
 
@@ -25,6 +27,9 @@ const fetchPull = /\bgit\s+fetch\b[^\n]*\bpull\/(?:\$\{\{[^}]*\}\}|[^\s/]+)\/(?:
 const switchTree = /\bgit\s+(?:checkout|switch|reset\s+--hard|merge|rebase|worktree\s+add)(?=\s|$)/;
 
 interface Checkout {
+  /** What is checked out, when it is not plainly pull request code, and why it is untrusted. */
+  what?: string;
+  why?: string;
   /** The events that set the ref; undefined when it is pull request code under any of them. */
   events?: string[];
   /** Where in a run: script the checkout happens, to look for commands after it. */
@@ -34,10 +39,19 @@ interface Checkout {
 }
 
 /** Whether a step puts pull request code into the working tree. */
-function untrustedCheckout(job: Job, step: Step): Checkout | undefined {
+function untrustedCheckout(job: Job, step: Step, taint: Taint): Checkout | undefined {
   if (step.uses?.startsWith("actions/checkout@")) {
     const ref = step.with.ref ?? "";
     const repo = step.with.repository ?? "";
+    const tainted = taint.find(`${repo} ${ref}`, job);
+    if (tainted) {
+      return {
+        branch: false,
+        events: ["workflow_run"],
+        what: `the ref given by ${tainted.ref}`,
+        why: `; ${tainted.ref} comes from ${tainted.chain}, so the pull request behind the triggering run chooses what is checked out`,
+      };
+    }
     if (untrustedRef.test(ref) || repo.includes("github.event.pull_request.head.repo")) {
       const checkout: Checkout = { branch: branchRef.test(ref) };
       // github.event.pull_request is empty under workflow_run and the other way round.
@@ -88,42 +102,43 @@ function rate(
   const ratings: Rating[] = [];
   for (const { event, verdict } of exposures(wf, job, index, events)) {
     const where = `in ${/^[aeiou]/.test(event) ? "an" : "a"} ${event} workflow`;
+    const what = checkout.what ?? "pull request code";
     let rating: Rating;
     if (!exec) {
       rating = {
         severity: "low",
-        note: `checks out pull request code ${where} but doesn't appear to execute it; a later build or test step would make it a pwn request`,
+        note: `checks out ${what} ${where} but doesn't appear to execute it; a later build or test step would make it a pwn request`,
       };
     } else if (verdict.kind === "open") {
       rating = {
         severity: "high",
-        note: `checks out pull request code ${where} and runs it (${exec}) with the workflow's secrets and write token ("pwn request")`,
+        note: `checks out ${what} ${where} and runs it (${exec}) with the workflow's secrets and write token ("pwn request")`,
       };
     } else if (verdict.strength === "label") {
       const later = event === "issue_comment" || (event === "pull_request_target" && labelRecheckable(wf));
       rating = later
         ? {
             severity: "high",
-            note: `checks out pull request code ${where} and runs it (${exec}) when ${verdict.reason}; the label stays on the pull request, so any later label event runs newer commits once the label is present`,
+            note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}; the label stays on the pull request, so any later label event runs newer commits once the label is present`,
           }
         : {
             severity: "medium",
-            note: `checks out pull request code ${where} and runs it (${exec}) when ${verdict.reason}`,
+            note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}`,
           };
     } else if (verdict.strength === "maintainer") {
       rating = checkout.branch
         ? {
             severity: "high",
-            note: `checks out pull request code ${where} and runs it (${exec}) when ${verdict.reason}, but it checks out the branch rather than the commit that was reviewed, so commits pushed after that also run`,
+            note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}, but it checks out the branch rather than the commit that was reviewed, so commits pushed after that also run`,
           }
         : {
             severity: "medium",
-            note: `checks out pull request code ${where} and runs it (${exec}) when ${verdict.reason}; review the exact commit before that`,
+            note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}; review the exact commit before that`,
           };
     } else {
       rating = {
         severity: "low",
-        note: `checks out pull request code ${where} and runs it (${exec}), but only when ${verdict.reason}`,
+        note: `checks out ${what} ${where} and runs it (${exec}), but only when ${verdict.reason}`,
       };
     }
     ratings.push(withUpstream(rating, wf, ctx, event));
@@ -148,9 +163,10 @@ function laterExec(job: Job, index: number, checkout: Checkout): string | undefi
 export function checkPwnRequest(wf: Workflow, ctx: Context): Finding[] {
   if (!wf.triggers.some((t) => privileged.includes(t))) return [];
   const findings: Finding[] = [];
+  const taint = artifactTaint(wf);
   for (const job of wf.jobs) {
     job.steps.forEach((step, index) => {
-      const checkout = untrustedCheckout(job, step);
+      const checkout = untrustedCheckout(job, step, taint);
       if (!checkout) return;
       const rating = rate(wf, job, index, checkout, laterExec(job, index, checkout), ctx);
       if (!rating) return;
@@ -159,7 +175,7 @@ export function checkPwnRequest(wf: Workflow, ctx: Context): Finding[] {
         severity: rating.severity,
         file: wf.file,
         line: step.line,
-        message: rating.note.replace(/^; /, ""),
+        message: rating.note.replace(/^; /, "") + (checkout.why ?? ""),
         help: "Use the pull_request trigger to build untrusted code, or split into an unprivileged build workflow and a privileged workflow that only consumes artifacts.",
       });
     });
