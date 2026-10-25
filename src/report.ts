@@ -32,10 +32,16 @@ export function render(
   }
 }
 
+function location(f: Finding): string {
+  return f.column === undefined
+    ? `${f.file}:${String(f.line)}`
+    : `${f.file}:${String(f.line)}:${String(f.column)}`;
+}
+
 function text(findings: Finding[], files: number): string {
   const lines = findings.map((f) => {
     const fix = f.fixable ? " [fixable]" : "";
-    return `${f.file}:${String(f.line)}  ${f.severity.toUpperCase().padEnd(6)} ${f.ruleId}  ${f.message}${fix}`;
+    return `${location(f)}  ${f.severity.toUpperCase().padEnd(6)} ${f.ruleId}  ${f.message}${fix}`;
   });
   return [...lines, lines.length ? "" : "No problems found.", summary(findings, files), ""].join("\n");
 }
@@ -47,9 +53,7 @@ function markdown(findings: Finding[], files: number): string {
     out.push("| Severity | Rule | Location | Problem | How to fix |", "|---|---|---|---|---|");
     for (const f of findings) {
       const esc = (s: string | undefined) => (s ?? "").replaceAll("|", "\\|");
-      out.push(
-        `| ${f.severity} | ${f.ruleId} | \`${f.file}:${String(f.line)}\` | ${esc(f.message)} | ${esc(f.help)} |`,
-      );
+      out.push(`| ${f.severity} | ${f.ruleId} | \`${location(f)}\` | ${esc(f.message)} | ${esc(f.help)} |`);
     }
   }
   return out.join("\n") + "\n";
@@ -87,7 +91,15 @@ function sarif(findings: Finding[], rules: Rule[], version: string) {
           level: sarifLevel[f.severity],
           message: { text: f.help ? `${f.message}. ${f.help}` : f.message },
           locations: [
-            { physicalLocation: { artifactLocation: { uri: f.file }, region: { startLine: f.line } } },
+            {
+              physicalLocation: {
+                artifactLocation: { uri: f.file },
+                region:
+                  f.column === undefined
+                    ? { startLine: f.line }
+                    : { startLine: f.line, startColumn: f.column },
+              },
+            },
           ],
         })),
       },
