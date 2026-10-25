@@ -1,0 +1,11 @@
+on: push
+permissions: {}
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "*"
+          claude_args: --allowedTools Bash

@@ -1,0 +1,49 @@
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  bash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "*"
+          claude_args: |
+            --allowedTools "Bash(gh pr:*),Bash(gh issue view:*),Read"
+  read-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "*"
+          claude_args: --allowedTools "Bash(gh issue view:*),Bash(gh pr diff:*),Read,Grep"
+  legacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@beta
+        with:
+          github_token: ${{ github.token }}
+          allowed_non_write_users: alice,bob
+          allowed_tools: "Edit,Bash"
+  default:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: Review this pull request
+  members:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.author_association == 'MEMBER' || github.event.issue.author_association == 'MEMBER'
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "*"
+          claude_args: --allowed-tools=Bash
