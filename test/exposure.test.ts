@@ -150,3 +150,22 @@ describe("artifact-derived values in workflow_run workflows", () => {
     expect(summary("artifact-nightly.yml", "GHA001")).toEqual(["13:medium"]);
   });
 });
+
+describe("GHA010 AI agents open to outsiders", () => {
+  it("rates claude-code-action by allowed_non_write_users and the tools it may use", () => {
+    expect(summary("agent-claude.yml", "GHA010")).toEqual(["13:high", "30:high", "22:medium", "45:low"]);
+    const bash = findings("agent-claude.yml", "GHA010")[0]?.message ?? "";
+    expect(bash).toContain('allowed_non_write_users: "*"');
+    expect(bash).toContain("Bash(gh pr:*)");
+    expect(bash).toContain("prompt injection");
+    expect(findings("agent-claude.yml", "GHA010")[1]?.message).toContain("Bash");
+  });
+
+  it("rates openai/codex-action by allow-users and its sandbox", () => {
+    expect(summary("agent-codex.yml", "GHA010")).toEqual(["14:high", "7:medium"]);
+  });
+
+  it("ignores agents on events outsiders cannot trigger", () => {
+    expect(summary("agent-push.yml", "GHA010")).toEqual([]);
+  });
+});
