@@ -69,6 +69,26 @@ describe("rules", () => {
     expect(found.map((f) => `${String(f.line)}:${String(f.column)}`)).toEqual(["9:17", "12:11", "17:26"]);
   });
 
+  it("reports the same problem on the same line once", () => {
+    const wf = parseWorkflow(
+      "x.yml",
+      [
+        "on: issues",
+        "permissions: {}",
+        "jobs:",
+        "  a:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: |",
+        "          git checkout -B ${{ github.head_ref }} origin/${{ github.head_ref }}",
+        "          git push origin HEAD:${{ github.head_ref }}",
+        "",
+      ].join("\n"),
+    );
+    const found = wf ? analyze(wf).filter((f) => f.ruleId === "GHA001") : [];
+    expect(found.map((f) => `${String(f.line)}:${String(f.column)}`)).toEqual(["8:27", "9:32"]);
+  });
+
   it("a hardened workflow has no findings", () => {
     expect(check("clean/.github/workflows/ci.yml")).toEqual([]);
   });
