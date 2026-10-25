@@ -1,4 +1,5 @@
 import type { Finding } from "../types.js";
+import { positionIn } from "../workflow.js";
 import type { Step, Workflow } from "../workflow.js";
 
 /**
@@ -50,13 +51,21 @@ export function envName(context: string): string {
   return tail.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
 }
 
-function scripts(step: Step): { text: string; fixable: boolean }[] {
-  const out: { text: string; fixable: boolean }[] = [];
-  if (step.run !== undefined) out.push({ text: step.run, fixable: true });
+export interface Script {
+  text: string;
+  /** The YAML scalar holding the script, for exact positions. */
+  node: unknown;
+  fixable: boolean;
+}
+
+/** The scripts a step runs: run: and the script input of actions/github-script. */
+export function scripts(step: Step): Script[] {
+  const out: Script[] = [];
+  if (step.run !== undefined) out.push({ text: step.run, node: step.node.get("run", true), fixable: true });
   // actions/github-script evaluates its `script` input as JavaScript.
   const script = step.with.script;
   if (step.uses?.startsWith("actions/github-script@") && script !== undefined) {
-    out.push({ text: script, fixable: false });
+    out.push({ text: script, node: step.node.getIn(["with", "script"], true), fixable: false });
   }
   return out;
 }
@@ -65,13 +74,16 @@ export function checkInjection(wf: Workflow): Finding[] {
   const findings: Finding[] = [];
   for (const job of wf.jobs) {
     for (const step of job.steps) {
-      for (const { text, fixable } of scripts(step)) {
+      for (const { text, node, fixable } of scripts(step)) {
+        const seen = new Map<string, number>();
         for (const inj of findInjections(text)) {
+          const n = seen.get(inj.text) ?? 0;
+          seen.set(inj.text, n + 1);
           findings.push({
             ruleId: "GHA001",
             severity: "high",
             file: wf.file,
-            line: step.line,
+            ...positionIn(wf, node, inj.text, n),
             message: `${inj.context} is interpolated into a script; a crafted value can run arbitrary commands`,
             help: fixable
               ? `Pass it through an environment variable: env: { ${envName(inj.context)}: ${inj.text} } and use "$${envName(inj.context)}" in the script.`
