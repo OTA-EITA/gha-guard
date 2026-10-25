@@ -19,7 +19,7 @@ describe("cli", () => {
     const r = await cli([path.join(fixtures, "vulnerable")]);
     expect(r.code).toBe(1);
     expect(r.stdout).toContain("vulnerable/.github/workflows/triage.yml:10  HIGH   GHA002");
-    expect(r.stdout).toContain("vulnerable/actions/notify/action.yml:5");
+    expect(r.stdout).toContain("vulnerable/actions/notify/action.yml:6:");
     expect(r.stdout).toContain("4 file(s)");
   });
 
@@ -33,6 +33,7 @@ describe("cli", () => {
         ruleId: "GHA000",
         file: "broken/.github/workflows/duplicate-key.yml",
         line: 8,
+        message: "could not parse the file, so it was not checked: Map keys must be unique",
       }),
     );
     expect(findings).toContainEqual(
