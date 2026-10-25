@@ -1,5 +1,6 @@
 import type { Finding, Rule } from "../types.js";
 import { severityRank } from "../types.js";
+import type { Context } from "../exposure.js";
 import type { Workflow } from "../workflow.js";
 import { checkHygiene } from "./hygiene.js";
 import { checkInjection } from "./injection.js";
@@ -70,7 +71,13 @@ export const rules: Rule[] = [
   },
 ];
 
-const checks = [checkInjection, checkPwnRequest, checkPermissions, checkPinning, checkHygiene];
+const checks: ((wf: Workflow, ctx: Context) => Finding[])[] = [
+  checkInjection,
+  checkPwnRequest,
+  checkPermissions,
+  checkPinning,
+  checkHygiene,
+];
 
 /** Drops repeats of the same problem on the same line, keeping the first (leftmost) one. */
 function dedupe(findings: Finding[]): Finding[] {
@@ -83,9 +90,13 @@ function dedupe(findings: Finding[]): Finding[] {
   });
 }
 
-/** Runs every rule and sorts findings by severity, then position. */
-export function analyze(wf: Workflow): Finding[] {
-  return dedupe(checks.flatMap((check) => check(wf))).sort(
+/**
+ * Runs every rule and sorts findings by severity, then position. `ctx.workflows`
+ * holds the other workflows of the repository, for rules that follow
+ * workflow_run back to its upstream workflow.
+ */
+export function analyze(wf: Workflow, ctx: Context = { workflows: [wf] }): Finding[] {
+  return dedupe(checks.flatMap((check) => check(wf, ctx))).sort(
     (a, b) =>
       severityRank[b.severity] - severityRank[a.severity] ||
       a.line - b.line ||
