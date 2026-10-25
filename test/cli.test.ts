@@ -23,6 +23,23 @@ describe("cli", () => {
     expect(r.stdout).toContain("4 file(s)");
   });
 
+  it("reports a file that cannot be parsed as GHA000 and keeps scanning the others", async () => {
+    const r = await cli(["--format", "json", path.join(fixtures, "broken")]);
+    expect(r.code).toBe(1);
+    const findings = (JSON.parse(r.stdout) as { findings: { ruleId: string; file: string; line: number }[] })
+      .findings;
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        ruleId: "GHA000",
+        file: "broken/.github/workflows/duplicate-key.yml",
+        line: 8,
+      }),
+    );
+    expect(findings).toContainEqual(
+      expect.objectContaining({ ruleId: "GHA001", file: "broken/.github/workflows/valid.yml" }),
+    );
+  });
+
   it("passes a clean repository", async () => {
     const r = await cli([path.join(fixtures, "clean")]);
     expect(r.code).toBe(0);
