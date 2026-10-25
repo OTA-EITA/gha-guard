@@ -34,6 +34,7 @@ export interface RunResult {
 /** Scans paths, optionally fixing files in place, and returns the remaining findings. */
 export async function scan(paths: string[], opts: { fix: boolean; cwd: string }): Promise<RunResult> {
   const result: RunResult = { findings: [], files: 0, fixed: [] };
+  const parsed: Workflow[] = [];
   for (const p of paths) {
     for (const file of await findFiles(p)) {
       const rel = path.relative(opts.cwd, file).split(path.sep).join("/") || file;
@@ -51,8 +52,17 @@ export async function scan(paths: string[], opts: { fix: boolean; cwd: string })
           if (!wf) continue;
         }
       }
-      result.findings.push(...analyze(wf));
+      parsed.push(wf);
     }
+  }
+  // Rules may look at the other workflows of the same directory (workflow_run upstreams).
+  const byDir = new Map<string, Workflow[]>();
+  for (const wf of parsed) {
+    const dir = path.posix.dirname(wf.file);
+    byDir.set(dir, [...(byDir.get(dir) ?? []), wf]);
+  }
+  for (const wf of parsed) {
+    result.findings.push(...analyze(wf, { workflows: byDir.get(path.posix.dirname(wf.file)) ?? [wf] }));
   }
   return result;
 }
