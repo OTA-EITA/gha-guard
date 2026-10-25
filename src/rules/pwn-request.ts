@@ -7,6 +7,9 @@ import type { Job, Step, Workflow } from "../workflow.js";
 /** Triggers that run with the base repository's secrets and write token, and know about a pull request. */
 const privileged = ["pull_request_target", "workflow_run", "issue_comment"];
 
+// github.event.pull_request and github.head_ref are only set for pull request events.
+const prEvents = ["pull_request_target"];
+
 /** Refs that point at code from the pull request author. */
 const untrustedRef =
   /github\.event\.pull_request\.head\.(sha|ref)|github\.head_ref|github\.event\.workflow_run\.head_(sha|branch)|refs\/pull\//;
@@ -19,9 +22,11 @@ const commentBranch = /^(xt0rted|alessbell)\/pull-request-comment-branch@/;
 
 const ghCheckout = /\b(?:gh|hub)\s+pr\s+checkout\b/;
 const fetchPull = /\bgit\s+fetch\b[^\n]*\bpull\/(?:\$\{\{[^}]*\}\}|[^\s/]+)\/(?:head|merge)\b/;
-const switchTree = /\bgit\s+(?:checkout|switch|reset\s+--hard|merge|rebase|worktree\s+add)\b/;
+const switchTree = /\bgit\s+(?:checkout|switch|reset\s+--hard|merge|rebase|worktree\s+add)(?=\s|$)/;
 
 interface Checkout {
+  /** The events that set the ref; undefined when it is pull request code under any of them. */
+  events?: string[];
   /** Where in a run: script the checkout happens, to look for commands after it. */
   scriptRest?: string;
   /** True when the checked-out ref is a branch, which can move after a maintainer looked at it. */
@@ -34,13 +39,20 @@ function untrustedCheckout(job: Job, step: Step): Checkout | undefined {
     const ref = step.with.ref ?? "";
     const repo = step.with.repository ?? "";
     if (untrustedRef.test(ref) || repo.includes("github.event.pull_request.head.repo")) {
-      return { branch: branchRef.test(ref) };
+      const checkout: Checkout = { branch: branchRef.test(ref) };
+      // github.event.pull_request is empty under workflow_run and the other way round.
+      if (!ref.includes("refs/pull/")) {
+        checkout.events = [`${ref} ${repo}`.includes("workflow_run.head") ? "workflow_run" : ""]
+          .concat(/pull_request\.head|head_ref/.test(`${ref} ${repo}`) ? prEvents : [])
+          .filter(Boolean);
+      }
+      return checkout;
     }
     // steps.<id>.outputs.head_sha of an action that looks up the commented pull request.
     const m = /steps\.([\w-]+)\.outputs\.(head_\w+)/.exec(`${ref} ${repo}`);
     const source = m && job.steps.find((s) => s.id === m[1]);
     if (source?.uses && commentBranch.test(source.uses)) {
-      return { branch: !ref.includes('head_sha') };
+      return { branch: !ref.includes("head_sha") };
     }
     return undefined;
   }
@@ -72,10 +84,10 @@ function rate(
   exec: string | undefined,
   ctx: Context,
 ): Rating | undefined {
-  const events = wf.triggers.filter((t) => privileged.includes(t));
+  const events = wf.triggers.filter((t) => privileged.includes(t) && (checkout.events ?? [t]).includes(t));
   const ratings: Rating[] = [];
   for (const { event, verdict } of exposures(wf, job, index, events)) {
-    const where = `in a ${event} workflow`;
+    const where = `in ${/^[aeiou]/.test(event) ? "an" : "a"} ${event} workflow`;
     let rating: Rating;
     if (!exec) {
       rating = {
