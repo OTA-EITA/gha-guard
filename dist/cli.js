@@ -1279,9 +1279,9 @@ ${indent}`) + "'";
         return quotedString(value, ctx);
       }
       const indent = ctx.indent || (ctx.forceBlockIndent || containsDocumentMarker(value) ? "  " : "");
-      const literal = blockQuote === "literal" ? true : blockQuote === "folded" || type === Scalar.Scalar.BLOCK_FOLDED ? false : type === Scalar.Scalar.BLOCK_LITERAL ? true : !lineLengthOverLimit(value, lineWidth, indent.length);
+      const literal2 = blockQuote === "literal" ? true : blockQuote === "folded" || type === Scalar.Scalar.BLOCK_FOLDED ? false : type === Scalar.Scalar.BLOCK_LITERAL ? true : !lineLengthOverLimit(value, lineWidth, indent.length);
       if (!value)
-        return literal ? "|\n" : ">\n";
+        return literal2 ? "|\n" : ">\n";
       let chomp;
       let endStart;
       for (endStart = value.length; endStart > 0; --endStart) {
@@ -1330,7 +1330,7 @@ ${indent}`) + "'";
         if (onComment)
           onComment();
       }
-      if (!literal) {
+      if (!literal2) {
         const foldedValue = value.replace(/\n+/g, "\n$&").replace(/(?:^|\n)([\t ].*)(?:([\n\t ]*)\n(?![\n\t ]))?/g, "$1$2").replace(/\n+/g, `$&${indent}`);
         let literalFallback = false;
         const foldOptions = getFoldOptions(ctx, true);
@@ -6440,7 +6440,7 @@ var require_parser = __commonJS({
         }
       }
     }
-    var Parser = class {
+    var Parser2 = class {
       /**
        * @param onNewLine - If defined, called separately with the start position of
        *   each new line (in `parse()`, including the start of input).
@@ -7213,7 +7213,7 @@ var require_parser = __commonJS({
         }
       }
     };
-    exports.Parser = Parser;
+    exports.Parser = Parser2;
   }
 });
 
@@ -7394,10 +7394,13 @@ function render(findings, format, opts) {
       return text(findings, opts.files);
   }
 }
+function location(f) {
+  return f.column === void 0 ? `${f.file}:${String(f.line)}` : `${f.file}:${String(f.line)}:${String(f.column)}`;
+}
 function text(findings, files) {
   const lines = findings.map((f) => {
     const fix2 = f.fixable ? " [fixable]" : "";
-    return `${f.file}:${String(f.line)}  ${f.severity.toUpperCase().padEnd(6)} ${f.ruleId}  ${f.message}${fix2}`;
+    return `${location(f)}  ${f.severity.toUpperCase().padEnd(6)} ${f.ruleId}  ${f.message}${fix2}`;
   });
   return [...lines, lines.length ? "" : "No problems found.", summary(findings, files), ""].join("\n");
 }
@@ -7408,9 +7411,7 @@ function markdown(findings, files) {
     out.push("| Severity | Rule | Location | Problem | How to fix |", "|---|---|---|---|---|");
     for (const f of findings) {
       const esc = (s) => (s ?? "").replaceAll("|", "\\|");
-      out.push(
-        `| ${f.severity} | ${f.ruleId} | \`${f.file}:${String(f.line)}\` | ${esc(f.message)} | ${esc(f.help)} |`
-      );
+      out.push(`| ${f.severity} | ${f.ruleId} | \`${location(f)}\` | ${esc(f.message)} | ${esc(f.help)} |`);
     }
   }
   return out.join("\n") + "\n";
@@ -7446,7 +7447,12 @@ function sarif(findings, rules2, version2) {
           level: sarifLevel[f.severity],
           message: { text: f.help ? `${f.message}. ${f.help}` : f.message },
           locations: [
-            { physicalLocation: { artifactLocation: { uri: f.file }, region: { startLine: f.line } } }
+            {
+              physicalLocation: {
+                artifactLocation: { uri: f.file },
+                region: f.column === void 0 ? { startLine: f.line } : { startLine: f.line, startColumn: f.column }
+              }
+            }
           ]
         }))
       }
@@ -7456,6 +7462,653 @@ function sarif(findings, rules2, version2) {
 
 // src/types.ts
 var severityRank = { high: 3, medium: 2, low: 1 };
+
+// src/events.ts
+var privilegedEvents = /* @__PURE__ */ new Set([
+  "pull_request_target",
+  "issues",
+  "issue_comment",
+  "discussion",
+  "discussion_comment",
+  "workflow_run",
+  "gollum",
+  "fork",
+  "watch"
+]);
+var forkRestrictedEvents = /* @__PURE__ */ new Set([
+  "pull_request",
+  "pull_request_review",
+  "pull_request_review_comment"
+]);
+var anyEvent = "*";
+function scenarios(wf) {
+  if (wf.kind === "action") return [anyEvent];
+  return wf.triggers.map((t) => t === "workflow_call" ? anyEvent : t);
+}
+var prEvents = [
+  "pull_request",
+  "pull_request_target",
+  "pull_request_review",
+  "pull_request_review_comment"
+];
+var setBy = [
+  [/^github\.(event\.pull_request\.|head_ref$)/, prEvents],
+  [/^github\.event\.issue\./, ["issues", "issue_comment"]],
+  [
+    /^github\.event\.comment\./,
+    ["issue_comment", "pull_request_review_comment", "commit_comment", "discussion_comment"]
+  ],
+  [/^github\.event\.review\./, ["pull_request_review"]],
+  [/^github\.event\.discussion\./, ["discussion", "discussion_comment"]],
+  [/^github\.event\.pages[.[]/, ["gollum"]],
+  [/^github\.event\.(commits|head_commit)[.[]/, ["push"]],
+  [/^github\.event\.workflow_run\./, ["workflow_run"]]
+];
+function eventsSetting(context) {
+  return setBy.find(([re]) => re.test(context))?.[1];
+}
+var trustedUpstreamTriggers = /* @__PURE__ */ new Set(["push", "schedule", "workflow_dispatch", "release", "merge_group"]);
+function trustedUpstream(wf, workflows) {
+  const config = wf.on.workflow_run;
+  const names = config && typeof config === "object" ? config.workflows : void 0;
+  const list = typeof names === "string" ? [names] : Array.isArray(names) ? names : [];
+  if (list.length === 0 || !list.every((n) => typeof n === "string")) return void 0;
+  for (const name of list) {
+    const wanted = name.toLowerCase();
+    const upstream = workflows.filter(
+      (w) => w !== wf && w.kind === "workflow" && (w.name === void 0 ? w.file.toLowerCase().endsWith(wanted) : w.name.toLowerCase() === wanted)
+    );
+    if (upstream.length === 0) return void 0;
+    if (!upstream.every((u) => u.triggers.length > 0 && u.triggers.every((t) => trustedUpstreamTriggers.has(t)))) {
+      return void 0;
+    }
+  }
+  return list;
+}
+
+// src/expr.ts
+var tokenRE = /\s*(?:'((?:[^']|'')*)'|(\d+(?:\.\d+)?)|([A-Za-z_][A-Za-z0-9_-]*)|(&&|\|\||==|!=|<=|>=|[<>!().,[\]*]))/y;
+function tokenize(text2) {
+  const tokens = [];
+  tokenRE.lastIndex = 0;
+  while (tokenRE.lastIndex < text2.length) {
+    if (/^\s*$/.test(text2.slice(tokenRE.lastIndex))) break;
+    const m = tokenRE.exec(text2);
+    if (!m) return null;
+    if (m[1] !== void 0) tokens.push({ t: "str", v: m[1].replaceAll("''", "'") });
+    else if (m[2] !== void 0) tokens.push({ t: "num", v: Number(m[2]) });
+    else if (m[3] !== void 0) tokens.push({ t: "id", v: m[3] });
+    else tokens.push({ t: "op", v: m[4] ?? "" });
+  }
+  return tokens;
+}
+var Parser = class {
+  constructor(tokens) {
+    this.tokens = tokens;
+  }
+  tokens;
+  i = 0;
+  peek() {
+    return this.tokens[this.i];
+  }
+  isOp(v) {
+    const t = this.peek();
+    return t?.t === "op" && t.v === v;
+  }
+  expect(v) {
+    if (!this.isOp(v)) throw new SyntaxError(`expected ${v}`);
+    this.i++;
+  }
+  parse() {
+    const e = this.or();
+    if (this.i !== this.tokens.length) throw new SyntaxError("trailing tokens");
+    return e;
+  }
+  binary(ops, next) {
+    let left = next();
+    for (; ; ) {
+      const t = this.peek();
+      if (t?.t !== "op" || !ops.includes(t.v)) return left;
+      this.i++;
+      left = { type: "binary", op: t.v, left, right: next() };
+    }
+  }
+  or() {
+    return this.binary(["||"], () => this.and());
+  }
+  and() {
+    return this.binary(["&&"], () => this.equality());
+  }
+  equality() {
+    return this.binary(["==", "!="], () => this.comparison());
+  }
+  comparison() {
+    return this.binary(["<", "<=", ">", ">="], () => this.unary());
+  }
+  unary() {
+    if (this.isOp("!")) {
+      this.i++;
+      return { type: "not", operand: this.unary() };
+    }
+    return this.primary();
+  }
+  primary() {
+    const t = this.peek();
+    if (!t) throw new SyntaxError("unexpected end");
+    this.i++;
+    if (t.t === "str" || t.t === "num") return { type: "literal", value: t.v };
+    if (t.t === "op") {
+      if (t.v !== "(") throw new SyntaxError(`unexpected ${t.v}`);
+      const e = this.or();
+      this.expect(")");
+      return this.member(e);
+    }
+    const word = t.v.toLowerCase();
+    if (word === "true" || word === "false") return { type: "literal", value: word === "true" };
+    if (word === "null") return { type: "literal", value: null };
+    if (this.isOp("(")) {
+      this.i++;
+      const args = [];
+      if (!this.isOp(")")) {
+        args.push(this.or());
+        while (this.isOp(",")) {
+          this.i++;
+          args.push(this.or());
+        }
+      }
+      this.expect(")");
+      return this.member({ type: "call", name: word, args });
+    }
+    return this.member({ type: "ref", path: word });
+  }
+  /** Property access and indexing after a primary expression. */
+  member(base) {
+    const parts = [];
+    for (; ; ) {
+      if (this.isOp(".")) {
+        this.i++;
+        const t = this.peek();
+        if (t?.t === "id") parts.push(t.v.toLowerCase());
+        else if (t?.t === "op" && t.v === "*") parts.push("*");
+        else throw new SyntaxError("expected a property name");
+        this.i++;
+      } else if (this.isOp("[")) {
+        this.i++;
+        const t = this.peek();
+        const index = this.or();
+        this.expect("]");
+        parts.push(index.type === "literal" && t?.t === "str" ? String(index.value).toLowerCase() : "*");
+      } else {
+        break;
+      }
+    }
+    if (parts.length === 0) return base;
+    if (base.type !== "ref") return { type: "other" };
+    return { type: "ref", path: [base.path, ...parts].join(".") };
+  }
+};
+function parseExpression(text2) {
+  const tokens = tokenize(text2);
+  if (!tokens || tokens.length === 0) return null;
+  try {
+    return new Parser(tokens).parse();
+  } catch {
+    return null;
+  }
+}
+function conditionText(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return null;
+  const text2 = value.trim();
+  const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(text2);
+  if (wrapped) {
+    const inner = wrapped[1] ?? "";
+    return inner.includes("${{") || inner.includes("}}") ? null : inner.trim();
+  }
+  return text2.includes("${{") ? null : text2;
+}
+
+// src/gates.ts
+var rank = { actor: 3, maintainer: 2, label: 1 };
+var TRUE = { k: "true" };
+var FALSE = { k: "false" };
+var UNKNOWN = { k: "unknown" };
+function gate(strength, reason) {
+  return { k: "gate", strength, reason };
+}
+function and(a, b) {
+  if (a.k === "false" || b.k === "false") return FALSE;
+  if (a.k === "gate" && b.k === "gate") return rank[b.strength] > rank[a.strength] ? b : a;
+  if (a.k === "gate") return a;
+  if (b.k === "gate") return b;
+  return a.k === "true" && b.k === "true" ? TRUE : UNKNOWN;
+}
+function or(a, b) {
+  if (a.k === "true" || b.k === "true") return TRUE;
+  if (a.k === "unknown" || b.k === "unknown") return UNKNOWN;
+  if (a.k === "false") return b;
+  if (b.k === "false") return a;
+  return rank[b.strength] < rank[a.strength] ? b : a;
+}
+function not(a) {
+  if (a.k === "true") return FALSE;
+  if (a.k === "false") return TRUE;
+  return UNKNOWN;
+}
+var trustedAssociations = /* @__PURE__ */ new Set(["owner", "member", "collaborator"]);
+var trustedRunEvents = /* @__PURE__ */ new Set([
+  "push",
+  "schedule",
+  "workflow_dispatch",
+  "release",
+  "merge_group",
+  "repository_dispatch",
+  "pull_request_target"
+]);
+var inputEvents = /* @__PURE__ */ new Set(["workflow_dispatch", "workflow_call", anyEvent]);
+var associationRE = /^github\.event\.[\w.]*author_association$/;
+var actorRE = /^github\.(actor|triggering_actor|event\.sender\.login|event\.[\w]+\.user\.login|event\.[\w]+\.author\.login)$/;
+var headRepoRE = /^github\.event\.(pull_request\.head\.repo\.full_name|workflow_run\.head_repository\.full_name)$/;
+var forkRE = /^github\.event\.(pull_request\.head\.repo\.fork|workflow_run\.head_repository\.fork)$/;
+var labelsRE = /^github\.event\.(pull_request|issue)\.labels\.\*\.name$/;
+function literal(e) {
+  return e.type === "literal" ? e.value : void 0;
+}
+function refPath(e) {
+  return e.type === "ref" ? e.path : void 0;
+}
+function listItems(e) {
+  const [arg] = e.type === "call" ? e.args : [];
+  if (e.type === "call" && e.name === "fromjson" && e.args.length === 1 && arg) {
+    const text3 = literal(arg);
+    if (typeof text3 !== "string") return void 0;
+    try {
+      const parsed = JSON.parse(text3);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((x) => typeof x === "string")) {
+        return parsed;
+      }
+    } catch {
+      return void 0;
+    }
+    return void 0;
+  }
+  const text2 = literal(e);
+  return typeof text2 === "string" && text2.trim() ? text2.split(/[\s,]+/).filter(Boolean) : void 0;
+}
+function checkRef(path3, scope) {
+  for (const [prefix, reason] of scope.checks) {
+    if (path3 === prefix || path3.startsWith(`${prefix}.`)) return reason;
+  }
+  return void 0;
+}
+function equals(path3, other, scope) {
+  const value = literal(other);
+  const otherPath = refPath(other);
+  if (path3 === "github.event_name" && typeof value === "string") {
+    if (scope.event === anyEvent) return UNKNOWN;
+    return value.toLowerCase() === scope.event ? TRUE : FALSE;
+  }
+  if (associationRE.test(path3) && typeof value === "string") {
+    return trustedAssociations.has(value.toLowerCase()) ? gate("actor", `author_association is ${value}`) : UNKNOWN;
+  }
+  if (actorRE.test(path3) && (typeof value === "string" || otherPath === "github.repository_owner")) {
+    const who = typeof value === "string" ? value : "the repository owner";
+    return gate("actor", `${path3} is ${who}`);
+  }
+  if (headRepoRE.test(path3) && (otherPath === "github.repository" || typeof value === "string" && value.includes("/"))) {
+    return gate("actor", "the pull request comes from this repository, not a fork");
+  }
+  if (forkRE.test(path3) && value === false) {
+    return gate("actor", "the pull request comes from this repository, not a fork");
+  }
+  if (path3 === "github.event.workflow_run.event" && typeof value === "string") {
+    return trustedRunEvents.has(value.toLowerCase()) ? gate("actor", `the triggering run came from a ${value} event`) : UNKNOWN;
+  }
+  if (path3 === "github.event.label.name" && typeof value === "string") {
+    return gate("maintainer", `a maintainer adds the '${value}' label`);
+  }
+  if (path3 === "github.event.pull_request.merged" && value === true) {
+    return gate("maintainer", "a maintainer merges the pull request");
+  }
+  const check = checkRef(path3, scope);
+  if (check) return gate("actor", check);
+  return UNKNOWN;
+}
+function compare(e, scope) {
+  const sides = [
+    [e.left, e.right],
+    [e.right, e.left]
+  ];
+  if (e.op === "==") {
+    for (const [a, b] of sides) {
+      const path3 = refPath(a);
+      if (path3) {
+        const v = equals(path3, b, scope);
+        if (v.k !== "unknown") return v;
+      }
+    }
+    return UNKNOWN;
+  }
+  if (e.op === "!=") {
+    for (const [a, b] of sides) {
+      const path3 = refPath(a);
+      if (path3 === "github.event_name" && typeof literal(b) === "string") {
+        if (scope.event === anyEvent) return UNKNOWN;
+        return String(literal(b)).toLowerCase() === scope.event ? FALSE : TRUE;
+      }
+      if (path3 && forkRE.test(path3) && literal(b) === true) {
+        return gate("actor", "the pull request comes from this repository, not a fork");
+      }
+    }
+  }
+  return UNKNOWN;
+}
+function call(e, scope) {
+  if (e.name !== "contains" || e.args.length !== 2) return UNKNOWN;
+  const [haystack, needle] = e.args;
+  const hay = refPath(haystack);
+  const label = literal(needle);
+  if (hay && labelsRE.test(hay) && typeof label === "string") {
+    return gate("label", `the pull request has the '${label}' label`);
+  }
+  if (hay && labelsRE.test(hay)) return UNKNOWN;
+  const path3 = refPath(needle);
+  const items = listItems(haystack);
+  if (!path3 || !items) return UNKNOWN;
+  if (associationRE.test(path3)) {
+    return items.every((i) => trustedAssociations.has(i.toLowerCase())) ? gate("actor", `author_association is ${items.join(", ")}`) : UNKNOWN;
+  }
+  if (actorRE.test(path3) && haystack.type === "call") {
+    return gate("actor", `${path3} is one of ${items.join(", ")}`);
+  }
+  if (path3 === "github.event_name") {
+    if (scope.event === anyEvent) return UNKNOWN;
+    return items.some((i) => i.toLowerCase() === scope.event) ? TRUE : FALSE;
+  }
+  return UNKNOWN;
+}
+function evaluate(e, scope) {
+  switch (e.type) {
+    case "literal":
+      return e.value === false || e.value === null || e.value === "" || e.value === 0 ? FALSE : TRUE;
+    case "ref": {
+      if (/^(github\.event\.)?inputs\./.test(e.path) && !inputEvents.has(scope.event)) return FALSE;
+      const check = checkRef(e.path, scope);
+      return check ? gate("actor", check) : UNKNOWN;
+    }
+    case "call":
+      return call(e, scope);
+    case "not":
+      if (e.operand.type === "ref" && forkRE.test(e.operand.path)) {
+        return gate("actor", "the pull request comes from this repository, not a fork");
+      }
+      return not(evaluate(e.operand, scope));
+    case "binary":
+      if (e.op === "&&") return and(evaluate(e.left, scope), evaluate(e.right, scope));
+      if (e.op === "||") return or(evaluate(e.left, scope), evaluate(e.right, scope));
+      return compare(e, scope);
+    case "other":
+      return UNKNOWN;
+  }
+}
+function parseCondition(raw) {
+  if (raw === void 0) return true;
+  const text2 = conditionText(raw);
+  if (typeof text2 === "boolean") return text2;
+  return text2 === null ? null : parseExpression(text2);
+}
+function evaluateCondition(raw, scope) {
+  const cond = parseCondition(raw);
+  if (cond === true) return TRUE;
+  if (cond === false) return FALSE;
+  return cond === null ? UNKNOWN : evaluate(cond, scope);
+}
+function usesStatusFunction(raw) {
+  const cond = parseCondition(raw);
+  if (cond === null) return typeof raw === "string" && /\b(always|failure|cancelled)\s*\(/i.test(raw);
+  if (typeof cond === "boolean") return false;
+  const visit = (e) => {
+    switch (e.type) {
+      case "call":
+        return ["always", "failure", "cancelled"].includes(e.name) || e.args.some(visit);
+      case "not":
+        return visit(e.operand);
+      case "binary":
+        return visit(e.left) || visit(e.right);
+      default:
+        return false;
+    }
+  };
+  return visit(cond);
+}
+var checkActionRE = /^[^@]*(team-membership|check-user-permission|check-actor-permission|actor-permission|repo-permission|repository-permission|permission-check|check-permission|is-collaborator|collaborator-check|org-membership)[^@]*@/i;
+var failingCheckActionRE = /^(lannonbr\/repo-permission-check-action|prince-chrismc\/check-actor-permissions-action|sushichop\/action-repository-permission)@/i;
+var checkScriptRE = /getCollaboratorPermissionLevel|collaborators\/[^\s'"]+\/permission|checkMembershipForUser|getMembershipForUserInOrg|\/teams\/[^\s'"]+\/memberships\/|orgs\/[^\s'"]+\/members\//;
+var actorCompareRE = /(?:\$\{\{\s*github\.(?:actor|triggering_actor)\s*\}\}|\$\{?GITHUB_(?:TRIGGERING_)?ACTOR\}?)["']?\s*(?:!=|==|=~|=)\s|(?:!=|==|=~|=)\s*["']?(?:\$\{\{\s*github\.(?:actor|triggering_actor)\s*\}\}|\$\{?GITHUB_(?:TRIGGERING_)?ACTOR\}?)/;
+var failRE = /setFailed|\bexit\s+1\b|\bthrow\b|process\.exit\(\s*1\s*\)/;
+function stepLabel(step) {
+  return step.uses?.split("@")[0] ?? step.name ?? step.id ?? "a step";
+}
+function permissionCheck(step) {
+  const script = step.run ?? (step.uses?.startsWith("actions/github-script@") ? step.with.script : void 0);
+  if (step.uses && checkActionRE.test(step.uses)) {
+    const fails = failingCheckActionRE.test(step.uses) || step.with.exit === "true";
+    return { fails, label: stepLabel(step) };
+  }
+  if (script !== void 0 && checkScriptRE.test(script)) {
+    return { fails: failRE.test(script), label: stepLabel(step) };
+  }
+  if (step.run !== void 0 && actorCompareRE.test(step.run) && failRE.test(step.run)) {
+    return { fails: true, label: stepLabel(step) };
+  }
+  return void 0;
+}
+function checkOutputs(wf, job) {
+  const out = /* @__PURE__ */ new Map();
+  for (const step of job.steps) {
+    const check = step.id ? permissionCheck(step) : void 0;
+    if (step.id && check) out.set(`steps.${step.id.toLowerCase()}.outputs`, `${check.label} passes`);
+  }
+  for (const id of job.needs) {
+    const needed = wf.jobs.find((j) => j.id === id);
+    if (!needed) continue;
+    const inner = checkOutputs(wf, { ...needed, needs: [] });
+    for (const [name, value] of Object.entries(needed.outputs)) {
+      const m = /steps\.([\w-]+)\.outputs/i.exec(value);
+      const reason = m?.[1] ? inner.get(`steps.${m[1].toLowerCase()}.outputs`) : void 0;
+      if (reason) out.set(`needs.${id.toLowerCase()}.outputs.${name.toLowerCase()}`, reason);
+    }
+  }
+  return out;
+}
+function toVerdict(v) {
+  if (v.k === "false") return { kind: "never" };
+  if (v.k === "gate") return { kind: "gated", strength: v.strength, reason: v.reason };
+  return { kind: "open" };
+}
+function jobValue(wf, job, event, seen) {
+  if (seen.has(job.id)) return UNKNOWN;
+  seen.add(job.id);
+  let value = evaluateCondition(job.if, { event, checks: checkOutputs(wf, job) });
+  if (!usesStatusFunction(job.if)) {
+    for (const id of job.needs) {
+      const needed = wf.jobs.find((j) => j.id === id);
+      if (!needed) continue;
+      let v = jobValue(wf, needed, event, seen);
+      const fails = needed.steps.map(permissionCheck).find((c) => c?.fails);
+      if (fails) v = and(v, gate("actor", `job ${needed.id} runs ${fails.label} first`));
+      value = and(value, v);
+    }
+  }
+  seen.delete(job.id);
+  return value;
+}
+function stepVerdict(wf, job, index, event) {
+  let value = jobValue(wf, job, event, /* @__PURE__ */ new Set());
+  const step = job.steps[index];
+  if (step) value = and(value, evaluateCondition(step.if, { event, checks: checkOutputs(wf, job) }));
+  for (const earlier of job.steps.slice(0, index)) {
+    const check = permissionCheck(earlier);
+    if (check?.fails) value = and(value, gate("actor", `${check.label} checks the actor's permission first`));
+  }
+  return toVerdict(value);
+}
+
+// src/exposure.ts
+function worst(ratings) {
+  let out;
+  for (const r of ratings) {
+    if (!out || severityRank[r.severity] > severityRank[out.severity]) out = r;
+  }
+  return out;
+}
+function withEnvironment(rating, job) {
+  if (!job.environment || rating.severity !== "high") return rating;
+  return {
+    severity: "medium",
+    note: `${rating.note}; the job uses an environment, which requires approval only if the environment has required reviewers`
+  };
+}
+function withUpstream(rating, wf, ctx, event) {
+  if (event !== "workflow_run" || rating.severity !== "high") return rating;
+  const upstream = trustedUpstream(wf, ctx.workflows);
+  if (!upstream) return rating;
+  return {
+    severity: "medium",
+    note: `${rating.note}; the upstream workflow ${upstream.map((n) => `"${n}"`).join(", ")} only runs on push, schedule or similar, but a pull request can add a workflow with the same name, so also check github.event.workflow_run.event`
+  };
+}
+function exposures(wf, job, stepIndex, events = scenarios(wf)) {
+  const out = [];
+  for (const event of events) {
+    const verdict = stepVerdict(wf, job, stepIndex, event);
+    if (verdict.kind !== "never") out.push({ event, verdict });
+  }
+  return out;
+}
+function rateScript(wf, job, stepIndex, events, ctx) {
+  const ratings = [];
+  const restricted = [];
+  for (const { event, verdict } of exposures(wf, job, stepIndex, events)) {
+    let rating2;
+    if (forkRestrictedEvents.has(event)) {
+      restricted.push(event);
+      continue;
+    } else if (verdict.kind === "open") {
+      rating2 = { severity: "high", note: "" };
+    } else if (verdict.strength === "actor") {
+      rating2 = {
+        severity: "low",
+        note: `; it only runs when ${verdict.reason}, so an outsider cannot trigger it`
+      };
+    } else {
+      rating2 = { severity: "medium", note: `; it only runs when ${verdict.reason}` };
+    }
+    ratings.push(withUpstream(rating2, wf, ctx, event));
+  }
+  if (restricted.length > 0) {
+    ratings.push({
+      severity: "low",
+      note: `; only ${restricted.join("/")} events reach it, where pull requests from forks get a read-only token and no secrets`
+    });
+  }
+  const rating = worst(ratings);
+  return rating && withEnvironment(rating, job);
+}
+function settingEvents(events, setters) {
+  return setters ? events.filter((e) => e === anyEvent || setters.includes(e)) : events;
+}
+
+// src/rules/agents.ts
+var readOnlyGh = /^gh\s+(?:(?:issue|pr|repo|run|release|label|workflow|gist)\s+(?:view|list|diff|status|checks)|search)\b/;
+function splitTools(list) {
+  const tools = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of list) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && (ch === "," || /\s/.test(ch))) {
+      if (current) tools.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current) tools.push(current);
+  return tools;
+}
+function riskyTools(step) {
+  const lists = [];
+  const args = step.with.claude_args ?? "";
+  for (const m of args.matchAll(/--allowed-?tools(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/gi)) {
+    lists.push(m[1] ?? m[2] ?? m[3] ?? "");
+  }
+  if (step.with.allowed_tools) lists.push(step.with.allowed_tools);
+  return lists.flatMap(splitTools).filter((tool) => {
+    const bash = /^Bash(?:\((.*)\))?$/i.exec(tool);
+    if (!bash) return false;
+    const command = (bash[1] ?? "*").replace(/:\*$/, "").trim();
+    return !readOnlyGh.test(command);
+  });
+}
+function agentOf(step) {
+  const action = step.uses?.split("@")[0];
+  if (action === "anthropics/claude-code-action") {
+    const users = step.with.allowed_non_write_users?.trim();
+    if (!users) return void 0;
+    const risky = riskyTools(step);
+    return {
+      action,
+      who: `allowed_non_write_users: ${users === "*" ? '"*"' : users}`,
+      severity: risky.length ? "high" : "medium",
+      detail: risky.length ? `, including ${risky.join(", ")}` : ""
+    };
+  }
+  if (action === "openai/codex-action") {
+    const users = step.with["allow-users"]?.trim();
+    if (!users) return void 0;
+    const unsandboxed = step.with.sandbox === "danger-full-access" || step.with["safety-strategy"] === "unsafe" || /danger-full-access|dangerously-bypass/.test(step.with["codex-args"] ?? "");
+    return {
+      action,
+      who: `allow-users: ${users === "*" ? '"*"' : users}`,
+      severity: unsandboxed ? "high" : "medium",
+      detail: unsandboxed ? ", without a sandbox" : ""
+    };
+  }
+  return void 0;
+}
+function checkAgents(wf) {
+  const events = wf.triggers.filter((t) => privilegedEvents.has(t));
+  if (events.length === 0) return [];
+  const findings = [];
+  for (const job of wf.jobs) {
+    job.steps.forEach((step, index) => {
+      const agent = agentOf(step);
+      if (!agent) return;
+      const ratings = exposures(wf, job, index, events).map(({ event, verdict }) => {
+        const base = `${agent.action} lets people without write access drive the agent (${agent.who}) on ${event} events; prompt injection in what they write could make it use its tools${agent.detail}`;
+        if (verdict.kind === "open") return { severity: agent.severity, note: base };
+        if (verdict.strength === "actor") {
+          return { severity: "low", note: `${base}, but it only runs when ${verdict.reason}` };
+        }
+        return { severity: "medium", note: `${base}; it runs when ${verdict.reason}` };
+      });
+      const found = worst(ratings);
+      if (!found) return;
+      const rating = withEnvironment(found, job);
+      findings.push({
+        ruleId: "GHA010",
+        severity: rating.severity,
+        file: wf.file,
+        line: step.line,
+        message: rating.note,
+        help: "Drop the allow list, or limit the agent to read-only tools and keep the job's permissions and token minimal."
+      });
+    });
+  }
+  return findings;
+}
 
 // src/rules/hygiene.ts
 var prTriggers = ["pull_request", "pull_request_target"];
@@ -7516,6 +8169,246 @@ function checkHygiene(wf) {
   return findings;
 }
 
+// src/taint.ts
+var none = { find: () => void 0 };
+function downloads(step) {
+  const uses = step.uses?.split("@")[0];
+  if (uses === "actions/download-artifact" && step.with["run-id"] !== void 0) return uses;
+  if (uses === "dawidd6/action-download-artifact") return uses;
+  if (step.run !== void 0 && /\bgh\s+run\s+download\b/.test(step.run)) return "gh run download";
+  const script = uses === "actions/github-script" ? step.with.script ?? "" : step.run ?? "";
+  const api = /listWorkflowRunArtifacts|downloadArtifact|actions\/(?:runs\/\S+\/)?artifacts/.exec(script);
+  if (api) return `${uses ?? "a run: step"} via ${api[0]}`;
+  return void 0;
+}
+function producesOutputs(step) {
+  if (step.uses?.startsWith("actions/github-script@")) return true;
+  if (step.run !== void 0) return step.run.includes("GITHUB_OUTPUT");
+  return step.uses !== void 0;
+}
+var stepRefRE = /steps\.([\w-]+)\.outputs(?:\.[\w-]+)?/gi;
+var needsRefRE = /needs\.([\w-]+)\.outputs\.([\w-]+)/gi;
+function artifactTaint(wf) {
+  if (!wf.triggers.includes("workflow_run")) return none;
+  const steps = /* @__PURE__ */ new Map();
+  const outputs = /* @__PURE__ */ new Map();
+  const find = (text2, job) => {
+    for (const m of text2.matchAll(needsRefRE)) {
+      const chain = outputs.get(`${(m[1] ?? "").toLowerCase()}.${(m[2] ?? "").toLowerCase()}`);
+      if (chain && job.needs.some((n) => n.toLowerCase() === m[1]?.toLowerCase()))
+        return { ref: m[0], chain };
+    }
+    const own = steps.get(job.id);
+    for (const m of text2.matchAll(stepRefRE)) {
+      const chain = own?.get((m[1] ?? "").toLowerCase());
+      if (chain) return { ref: m[0], chain };
+    }
+    return void 0;
+  };
+  for (const job of wf.jobs) {
+    const own = /* @__PURE__ */ new Map();
+    steps.set(job.id, own);
+    let source;
+    for (const step of job.steps) {
+      source ??= downloads(step);
+      if (source && step.id && producesOutputs(step)) {
+        own.set(
+          step.id.toLowerCase(),
+          `an artifact of the triggering run (downloaded in job ${job.id} by ${source}) \u2192 steps.${step.id}.outputs`
+        );
+      }
+    }
+  }
+  for (let changed = true, rounds = 0; changed && rounds < 10; rounds++) {
+    changed = false;
+    for (const job of wf.jobs) {
+      const own = steps.get(job.id) ?? /* @__PURE__ */ new Map();
+      for (const step of job.steps) {
+        if (!step.id || own.has(step.id.toLowerCase()) || !producesOutputs(step)) continue;
+        const inputs = [...Object.values(step.env), ...Object.values(step.with), step.run ?? ""].join("\n");
+        const hit = find(inputs, job);
+        if (hit) {
+          own.set(step.id.toLowerCase(), `${hit.chain} \u2192 steps.${step.id}.outputs`);
+          changed = true;
+        }
+      }
+      for (const [name, value] of Object.entries(job.outputs)) {
+        const key = `${job.id.toLowerCase()}.${name.toLowerCase()}`;
+        if (outputs.has(key)) continue;
+        const hit = find(value, job);
+        if (hit) {
+          outputs.set(key, `${hit.chain} \u2192 needs.${job.id}.outputs.${name}`);
+          changed = true;
+        }
+      }
+    }
+  }
+  return { find };
+}
+
+// src/workflow.ts
+var import_yaml = __toESM(require_dist(), 1);
+function lineOf(lines, node) {
+  const offset = node?.range?.[0];
+  return offset === void 0 ? 1 : lines.linePos(offset).line;
+}
+function positionIn(wf, node, text2, occurrence = 0) {
+  if (!(0, import_yaml.isScalar)(node) || !node.range) return { line: 1 };
+  const [start, , end] = node.range;
+  const raw = wf.source.slice(start, end);
+  let at = -1;
+  for (let i = 0; i <= occurrence; i++) {
+    at = raw.indexOf(text2, at + 1);
+    if (at < 0) return { line: lineOf(wf.lines, node) };
+  }
+  const pos = wf.lines.linePos(start + at);
+  return { line: pos.line, column: pos.col };
+}
+function asStringMap(value) {
+  const out = {};
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = String(v);
+    }
+  }
+  return out;
+}
+function stringList(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.filter((v) => typeof v === "string");
+  if (value && typeof value === "object") {
+    const labels = value.labels;
+    if (labels !== void 0) return stringList(labels);
+  }
+  return [];
+}
+function parseSteps(lines, seq) {
+  if (!(0, import_yaml.isSeq)(seq)) return [];
+  const steps = [];
+  for (const item of seq.items) {
+    if (!(0, import_yaml.isMap)(item)) continue;
+    const plain = item.toJSON();
+    const step = {
+      node: item,
+      line: lineOf(lines, item),
+      with: asStringMap(plain.with),
+      env: asStringMap(plain.env)
+    };
+    if (typeof plain.id === "string") step.id = plain.id;
+    if (typeof plain.name === "string") step.name = plain.name;
+    if (plain.if !== void 0) step.if = plain.if;
+    if (typeof plain.uses === "string") step.uses = plain.uses;
+    if (typeof plain.run === "string") step.run = plain.run;
+    if (typeof plain.shell === "string") step.shell = plain.shell;
+    steps.push(step);
+  }
+  return steps;
+}
+function triggersOf(on) {
+  if (typeof on === "string") return [on];
+  if (Array.isArray(on)) return on.filter((t) => typeof t === "string");
+  if (on && typeof on === "object") return Object.keys(on);
+  return [];
+}
+function triggerConfig(on) {
+  return on && typeof on === "object" && !Array.isArray(on) ? on : {};
+}
+var WorkflowParseError = class extends Error {
+  constructor(file, line, reason) {
+    super(`${file}: ${reason}`);
+    this.file = file;
+    this.line = line;
+    this.reason = reason;
+    this.name = "WorkflowParseError";
+  }
+  file;
+  line;
+  reason;
+};
+function parseWorkflow(file, source) {
+  const lines = new import_yaml.LineCounter();
+  const doc = (0, import_yaml.parseDocument)(source, { lineCounter: lines, keepSourceTokens: true });
+  const error = doc.errors[0];
+  if (error) {
+    const reason = (error.message.split("\n")[0] ?? "").replace(/ at line \d+, column \d+:?$/, "") || "invalid YAML";
+    throw new WorkflowParseError(file, error.linePos?.[0].line ?? 1, reason);
+  }
+  const root = doc.contents;
+  if (!(0, import_yaml.isMap)(root)) return null;
+  const plain = root.toJSON();
+  const runs = root.get("runs", true);
+  if ((0, import_yaml.isMap)(runs) && runs.get("using") === "composite") {
+    return {
+      file,
+      kind: "action",
+      source,
+      doc,
+      lines,
+      triggers: [],
+      on: {},
+      hasPermissions: true,
+      // actions inherit the caller's permissions
+      permissions: void 0,
+      env: {},
+      jobs: [
+        {
+          id: "(composite)",
+          node: runs,
+          line: lineOf(lines, runs),
+          needs: [],
+          outputs: {},
+          environment: false,
+          hasPermissions: true,
+          permissions: void 0,
+          runsOn: [],
+          secretsInherit: false,
+          steps: parseSteps(lines, runs.get("steps", true))
+        }
+      ]
+    };
+  }
+  const jobsNode = root.get("jobs", true);
+  if (!(0, import_yaml.isMap)(jobsNode)) return null;
+  const jobs = [];
+  for (const pair of jobsNode.items) {
+    if (!(0, import_yaml.isScalar)(pair.key) || !(0, import_yaml.isMap)(pair.value)) continue;
+    const node = pair.value;
+    const job = node.toJSON();
+    const parsed = {
+      id: String(pair.key.value),
+      node,
+      line: lineOf(lines, pair.key),
+      needs: stringList(job.needs),
+      outputs: asStringMap(job.outputs),
+      environment: job.environment !== void 0 && job.environment !== null && job.environment !== "",
+      hasPermissions: node.has("permissions"),
+      permissions: job.permissions,
+      runsOn: stringList(job["runs-on"]),
+      secretsInherit: job.secrets === "inherit",
+      steps: parseSteps(lines, node.get("steps", true))
+    };
+    if (job.if !== void 0) parsed.if = job.if;
+    if (typeof job.uses === "string") parsed.uses = job.uses;
+    jobs.push(parsed);
+  }
+  const on = plain.on ?? plain.true;
+  const wf = {
+    file,
+    kind: "workflow",
+    source,
+    doc,
+    lines,
+    triggers: triggersOf(on),
+    on: triggerConfig(on),
+    hasPermissions: root.has("permissions"),
+    permissions: plain.permissions,
+    env: asStringMap(plain.env),
+    jobs
+  };
+  if (typeof plain.name === "string") wf.name = plain.name;
+  return wf;
+}
+
 // src/rules/injection.ts
 var untrusted = [
   /^github\.event\.(issue|pull_request|discussion)\.(title|body)$/,
@@ -7546,31 +8439,68 @@ function envName(context) {
 }
 function scripts(step) {
   const out = [];
-  if (step.run !== void 0) out.push({ text: step.run, fixable: true });
+  if (step.run !== void 0) out.push({ text: step.run, node: step.node.get("run", true), fixable: true });
   const script = step.with.script;
   if (step.uses?.startsWith("actions/github-script@") && script !== void 0) {
-    out.push({ text: script, fixable: false });
+    out.push({ text: script, node: step.node.getIn(["with", "script"], true), fixable: false });
   }
   return out;
 }
-function checkInjection(wf) {
+function checkInjection(wf, ctx) {
   const findings = [];
+  const events = scenarios(wf);
+  const taint = artifactTaint(wf);
   for (const job of wf.jobs) {
-    for (const step of job.steps) {
-      for (const { text: text2, fixable } of scripts(step)) {
-        for (const inj of findInjections(text2)) {
+    job.steps.forEach((step, index) => {
+      for (const { text: text2, node, fixable } of scripts(step)) {
+        const seenTaint = /* @__PURE__ */ new Map();
+        for (const m of text2.matchAll(expressionRE)) {
+          const safe = !fixable && /^tojson\s*\(/i.test(m[1] ?? "");
+          const hit = safe ? void 0 : taint.find(m[1] ?? "", job);
+          const n = seenTaint.get(m[0]) ?? 0;
+          seenTaint.set(m[0], n + 1);
+          if (!hit) continue;
+          const rating = rateScript(wf, job, index, ["workflow_run"], ctx);
+          if (!rating) continue;
           findings.push({
             ruleId: "GHA001",
-            severity: "high",
+            severity: rating.severity,
             file: wf.file,
-            line: step.line,
-            message: `${inj.context} is interpolated into a script; a crafted value can run arbitrary commands`,
+            ...positionIn(wf, node, m[0], n),
+            message: `${hit.ref} is interpolated into a script; it comes from ${hit.chain}, which whoever started that run (for example a fork pull request) can write, so a crafted value can run arbitrary commands${rating.note}`,
+            help: "Pass it through an environment variable and validate it (e.g. that a pull request number is numeric) before using it."
+          });
+        }
+        const seen = /* @__PURE__ */ new Map();
+        for (const inj of findInjections(text2)) {
+          const n = seen.get(inj.text) ?? 0;
+          seen.set(inj.text, n + 1);
+          const setters = eventsSetting(inj.context);
+          const relevant = settingEvents(events, setters);
+          let severity;
+          let message = `${inj.context} is interpolated into a script; a crafted value can run arbitrary commands`;
+          if (relevant.length === 0) {
+            if (exposures(wf, job, index).length === 0) continue;
+            severity = "low";
+            message = `${inj.context} is interpolated into a script, but it is only set for ${(setters ?? []).join(", ")} events, which do not trigger this workflow`;
+          } else {
+            const rating = rateScript(wf, job, index, relevant, ctx);
+            if (!rating) continue;
+            severity = rating.severity;
+            message += rating.note;
+          }
+          findings.push({
+            ruleId: "GHA001",
+            severity,
+            file: wf.file,
+            ...positionIn(wf, node, inj.text, n),
+            message,
             help: fixable ? `Pass it through an environment variable: env: { ${envName(inj.context)}: ${inj.text} } and use "$${envName(inj.context)}" in the script.` : "Read it in JavaScript from context.payload instead of interpolating it into the script.",
             fixable
           });
         }
       }
-    }
+    });
   }
   return findings;
 }
@@ -7661,35 +8591,202 @@ function checkPinning(wf) {
   return findings;
 }
 
-// src/rules/pwn-request.ts
-var privileged = ["pull_request_target", "workflow_run"];
-var untrustedRef = /github\.event\.pull_request\.head\.(sha|ref)|github\.head_ref|github\.event\.workflow_run\.head_(sha|branch)|refs\/pull\//;
-function checkPwnRequest(wf) {
-  const triggers = wf.triggers.filter((t) => privileged.includes(t));
-  if (triggers.length === 0) return [];
-  const findings = [];
-  for (const job of wf.jobs) {
-    for (const step of job.steps) {
-      if (!step.uses?.startsWith("actions/checkout@")) continue;
-      const ref = step.with.ref ?? "";
-      const repo = step.with.repository ?? "";
-      if (untrustedRef.test(ref) || repo.includes("github.event.pull_request.head.repo")) {
-        findings.push({
-          ruleId: "GHA002",
-          severity: "high",
-          file: wf.file,
-          line: step.line,
-          message: `checks out pull request code in a ${triggers.join("/")} workflow, which has secrets and a write token ("pwn request")`,
-          help: "Use the pull_request trigger to build untrusted code, or split into an unprivileged build workflow and a privileged workflow that only consumes artifacts."
-        });
-      }
+// src/exec.ts
+var commandStart = String.raw`(?:^|[;&|({\x60]|\$\()\s*(?:(?:sudo|time|exec|then|do|else|if|while|!|env(?:\s+\w+=\S*)*)\s+)*(?:(?:npx|pnpx|bunx)\s+(?:--?[\w-]+\s+)*)?`;
+var commands = [
+  String.raw`((?:npm|pnpm|bun)\s+(?:install|i|ci|run|run-script|test|t|build|exec|x|start))\b`,
+  String.raw`(yarn(?:\s+(?!global\b)[a-z][\w:-]*)?)(?=[\s;&|)]|$)`,
+  String.raw`(?:python3?\s+-m\s+)?(pip3?\s+install(?:\s+--?[\w-]+(?:=\S+)?)*?\s+(?:-e|--editable|-r|--requirement|\.(?=[\s[]|$)))`,
+  String.raw`((?:poetry|pdm|pipenv)\s+(?:install|sync|run|build))\b`,
+  String.raw`(uv\s+(?:sync|run|build|pip\s+install\s+(?:-e|-r|\.)))`,
+  String.raw`(tox|nox|hatch\s+(?:run|build|test))\b`,
+  String.raw`(python3?\s+setup\.py)\b`,
+  String.raw`(?:python3?\s+-m\s+)?(pytest)\b`,
+  String.raw`(python3?\s+(?!-)[\w./-]+\.py)\b`,
+  String.raw`(make|cmake|ninja|meson|bazel|bazelisk|just)(?=[\s;&|)]|$)`,
+  String.raw`(go\s+(?:build|test|run|generate|install|vet))\b`,
+  String.raw`(cargo\s+(?:build|test|run|check|clippy|bench|install\s+--path))\b`,
+  String.raw`(\.\/(?:gradlew|mvnw)|gradle|mvn)\b`,
+  String.raw`(bundle\s+(?:install|exec)|rake)\b`,
+  String.raw`(composer\s+(?:install|update|run|run-script))\b`,
+  String.raw`(docker\s+(?:buildx\s+)?build|docker\s+compose|docker-compose)\b`,
+  String.raw`((?:vercel|netlify)\s+build)\b`,
+  String.raw`(dotnet\s+(?:build|test|run|restore|publish|pack))\b`,
+  String.raw`(swift\s+(?:build|test|run)|xcodebuild)\b`,
+  String.raw`(mix\s+(?:deps\.get|compile|test)|deno\s+(?:task|run|test))\b`,
+  String.raw`((?:playwright|cypress)\s+(?:test|run)|jest|vitest|eslint|webpack|vite|turbo|nx|lerna)\b`,
+  String.raw`(pre-commit\s+run)\b`,
+  String.raw`(node\s+(?!-)[\w./-]+)`,
+  String.raw`((?:bash|sh|zsh|source)\s+(?:-(?!c\b)\w+\s+)*(?!-)[\w./-]+)`,
+  String.raw`(\.{1,2}\/[\w./-]+)`
+].map((c) => new RegExp(commandStart + c, "gm"));
+var globalInstall = /(?:^|\s)(?:-g|--global|global)(?:\s|$)/;
+function scriptRunsCode(script) {
+  let best;
+  for (const re of commands) {
+    re.lastIndex = 0;
+    for (const m of script.matchAll(re)) {
+      const text2 = m[1];
+      if (text2 === void 0) continue;
+      const lineEnd = script.indexOf("\n", m.index);
+      const rest = script.slice(m.index, lineEnd < 0 ? void 0 : lineEnd);
+      if (globalInstall.test(rest)) continue;
+      const at = m.index + m[0].length - text2.length;
+      if (!best || at < best.at) best = { at, text: text2.replace(/\s+/g, " ") };
+      break;
     }
+  }
+  return best?.text;
+}
+var builders = /^(docker\/build-push-action|cypress-io\/github-action|bahmutov\/npm-install|borales\/actions-yarn|goreleaser\/goreleaser-action|pre-commit\/action|gradle\/gradle-build-action|devcontainers\/ci)@/;
+function stepRunsCode(step) {
+  if (step.uses?.startsWith("./")) return step.uses;
+  if (step.uses && builders.test(step.uses)) return step.uses.split("@")[0];
+  if (step.uses?.startsWith("actions/github-script@")) {
+    return /require\(\s*['"`]\.{1,2}\/[^'"`]+['"`]\s*\)/.exec(step.with.script ?? "")?.[0];
+  }
+  return step.run === void 0 ? void 0 : scriptRunsCode(step.run);
+}
+
+// src/rules/pwn-request.ts
+var privileged = ["pull_request_target", "workflow_run", "issue_comment"];
+var prEvents2 = ["pull_request_target"];
+var untrustedRef = /github\.event\.pull_request\.head\.(sha|ref)|github\.head_ref|github\.event\.workflow_run\.head_(sha|branch)|refs\/pull\//;
+var branchRef = /github\.event\.pull_request\.head\.ref|github\.head_ref|workflow_run\.head_branch|refs\/pull\//;
+var commentBranch = /^(xt0rted|alessbell)\/pull-request-comment-branch@/;
+var ghCheckout = /\b(?:gh|hub)\s+pr\s+checkout\b/;
+var fetchPull = /\bgit\s+fetch\b[^\n]*\bpull\/(?:\$\{\{[^}]*\}\}|[^\s/]+)\/(?:head|merge)\b/;
+var switchTree = /\bgit\s+(?:checkout|switch|reset\s+--hard|merge|rebase|worktree\s+add)(?=\s|$)/;
+function untrustedCheckout(job, step, taint) {
+  if (step.uses?.startsWith("actions/checkout@")) {
+    const ref = step.with.ref ?? "";
+    const repo = step.with.repository ?? "";
+    const tainted = taint.find(`${repo} ${ref}`, job);
+    if (tainted) {
+      return {
+        branch: false,
+        events: ["workflow_run"],
+        what: `the ref given by ${tainted.ref}`,
+        why: `; ${tainted.ref} comes from ${tainted.chain}, so whoever started that run (for example a fork pull request) chooses what is checked out`
+      };
+    }
+    if (untrustedRef.test(ref) || repo.includes("github.event.pull_request.head.repo")) {
+      const checkout = { branch: branchRef.test(ref) };
+      if (!ref.includes("refs/pull/")) {
+        checkout.events = [`${ref} ${repo}`.includes("workflow_run.head") ? "workflow_run" : ""].concat(/pull_request\.head|head_ref/.test(`${ref} ${repo}`) ? prEvents2 : []).filter(Boolean);
+      }
+      return checkout;
+    }
+    const m = /steps\.([\w-]+)\.outputs\.(head_\w+)/.exec(`${ref} ${repo}`);
+    const source = m && job.steps.find((s) => s.id === m[1]);
+    if (source?.uses && commentBranch.test(source.uses)) {
+      return { branch: !ref.includes("head_sha") };
+    }
+    return void 0;
+  }
+  const run = step.run;
+  if (run === void 0) return void 0;
+  const gh = ghCheckout.exec(run);
+  if (gh) return { branch: true, scriptRest: run.slice(gh.index + gh[0].length) };
+  const fetch = fetchPull.exec(run);
+  const sw = fetch ? switchTree.exec(run.slice(fetch.index)) : null;
+  if (fetch && sw) return { branch: true, scriptRest: run.slice(fetch.index + sw.index + sw[0].length) };
+  return void 0;
+}
+function labelRecheckable(wf) {
+  const config = wf.on.pull_request_target;
+  const types = config && typeof config === "object" ? config.types : void 0;
+  const list = typeof types === "string" ? [types] : Array.isArray(types) ? types : void 0;
+  if (!list) return true;
+  return list.some((t) => ["labeled", "unlabeled", "synchronize", "edited"].includes(String(t)));
+}
+function rate(wf, job, index, checkout, exec, ctx) {
+  const events = wf.triggers.filter((t) => privileged.includes(t) && (checkout.events ?? [t]).includes(t));
+  const ratings = [];
+  for (const { event, verdict } of exposures(wf, job, index, events)) {
+    const where = `in ${/^[aeiou]/.test(event) ? "an" : "a"} ${event} workflow`;
+    const what = checkout.what ?? "pull request code";
+    let rating2;
+    if (!exec) {
+      rating2 = {
+        severity: "low",
+        note: `checks out ${what} ${where} but doesn't appear to execute it; a later build or test step would make it a pwn request`
+      };
+    } else if (verdict.kind === "open") {
+      rating2 = {
+        severity: "high",
+        note: `checks out ${what} ${where} and runs it (${exec}) with the workflow's secrets and write token ("pwn request")`
+      };
+    } else if (verdict.strength === "label") {
+      const later = event === "issue_comment" || event === "pull_request_target" && labelRecheckable(wf);
+      rating2 = later ? {
+        severity: "high",
+        note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}; the label stays on the pull request, so any later label event runs newer commits once the label is present`
+      } : {
+        severity: "medium",
+        note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}`
+      };
+    } else if (verdict.strength === "maintainer") {
+      rating2 = checkout.branch ? {
+        severity: "high",
+        note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}, but it checks out the branch rather than the commit that was reviewed, so commits pushed after that also run`
+      } : {
+        severity: "medium",
+        note: `checks out ${what} ${where} and runs it (${exec}) when ${verdict.reason}; review the exact commit before that`
+      };
+    } else {
+      rating2 = {
+        severity: "low",
+        note: `checks out ${what} ${where} and runs it (${exec}), but only when ${verdict.reason}`
+      };
+    }
+    ratings.push(withUpstream(rating2, wf, ctx, event));
+  }
+  const rating = worst(ratings);
+  return rating && withEnvironment(rating, job);
+}
+function laterExec(job, index, checkout) {
+  if (checkout.scriptRest !== void 0) {
+    const inline = scriptRunsCode(checkout.scriptRest);
+    if (inline) return inline;
+  }
+  for (const step of job.steps.slice(index + 1)) {
+    const exec = stepRunsCode(step);
+    if (exec) return exec;
+  }
+  return void 0;
+}
+function checkPwnRequest(wf, ctx) {
+  if (!wf.triggers.some((t) => privileged.includes(t))) return [];
+  const findings = [];
+  const taint = artifactTaint(wf);
+  for (const job of wf.jobs) {
+    job.steps.forEach((step, index) => {
+      const checkout = untrustedCheckout(job, step, taint);
+      if (!checkout) return;
+      const rating = rate(wf, job, index, checkout, laterExec(job, index, checkout), ctx);
+      if (!rating) return;
+      findings.push({
+        ruleId: "GHA002",
+        severity: rating.severity,
+        file: wf.file,
+        line: step.line,
+        message: rating.note.replace(/^; /, "") + (checkout.why ?? ""),
+        help: "Use the pull_request trigger to build untrusted code, or split into an unprivileged build workflow and a privileged workflow that only consumes artifacts."
+      });
+    });
   }
   return findings;
 }
 
 // src/rules/index.ts
 var rules = [
+  {
+    id: "GHA000",
+    severity: "low",
+    title: "Unparsable file",
+    description: "The file is not valid YAML, so it was skipped; the other files are still checked."
+  },
   {
     id: "GHA001",
     severity: "high",
@@ -7700,7 +8797,7 @@ var rules = [
     id: "GHA002",
     severity: "high",
     title: "Pwn request",
-    description: "pull_request_target or workflow_run checks out and runs pull request code with secrets."
+    description: "pull_request_target, workflow_run or issue_comment checks out and runs pull request code with secrets."
   },
   {
     id: "GHA003",
@@ -7743,11 +8840,35 @@ var rules = [
     severity: "low",
     title: "secrets: inherit",
     description: "Every secret is passed to a reusable workflow."
+  },
+  {
+    id: "GHA010",
+    severity: "high",
+    title: "AI agent open to outsiders",
+    description: "An AI agent action (claude-code-action, codex-action) accepts users without write access on events outsiders trigger."
   }
 ];
-var checks = [checkInjection, checkPwnRequest, checkPermissions, checkPinning, checkHygiene];
-function analyze(wf) {
-  return checks.flatMap((check) => check(wf)).sort((a, b) => severityRank[b.severity] - severityRank[a.severity] || a.line - b.line);
+var checks = [
+  checkInjection,
+  checkPwnRequest,
+  checkPermissions,
+  checkPinning,
+  checkHygiene,
+  checkAgents
+];
+function dedupe(findings) {
+  const seen = /* @__PURE__ */ new Set();
+  return findings.filter((f) => {
+    const key = [f.ruleId, f.file, String(f.line), f.message].join("\0");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function analyze(wf, ctx = { workflows: [wf] }) {
+  return dedupe(checks.flatMap((check) => check(wf, ctx))).sort(
+    (a, b) => severityRank[b.severity] - severityRank[a.severity] || a.line - b.line || (a.column ?? 0) - (b.column ?? 0)
+  );
 }
 
 // src/run.ts
@@ -7785,7 +8906,7 @@ async function findFiles(root) {
 }
 
 // src/fix.ts
-var import_yaml = __toESM(require_dist(), 1);
+var import_yaml2 = __toESM(require_dist(), 1);
 function shellOf(step, wf) {
   if (step.shell) return step.shell;
   const defaults = wf.doc.getIn(["defaults", "run", "shell"]);
@@ -7804,13 +8925,13 @@ function fixInjections(wf) {
       const injections = findInjections(step.run);
       if (injections.length === 0) continue;
       const runNode = step.node.get("run", true);
-      if (!(0, import_yaml.isScalar)(runNode)) continue;
+      if (!(0, import_yaml2.isScalar)(runNode)) continue;
       const existing = step.node.get("env", true);
       let env;
-      if ((0, import_yaml.isMap)(existing)) {
+      if ((0, import_yaml2.isMap)(existing)) {
         env = existing;
       } else {
-        env = new import_yaml.YAMLMap();
+        env = new import_yaml2.YAMLMap();
         step.node.set("env", env);
       }
       const shell = shellOf(step, wf);
@@ -7838,11 +8959,11 @@ function escape(s) {
 }
 function fixPermissions(wf) {
   const root = wf.doc.contents;
-  if (wf.kind !== "workflow" || wf.hasPermissions || !(0, import_yaml.isMap)(root)) return [];
+  if (wf.kind !== "workflow" || wf.hasPermissions || !(0, import_yaml2.isMap)(root)) return [];
   if (wf.jobs.every((j) => j.hasPermissions || j.uses !== void 0)) return [];
   const pair = wf.doc.createPair("permissions", { contents: "read" });
   const onIndex = root.items.findIndex(
-    (p) => (0, import_yaml.isScalar)(p.key) && (p.key.value === "on" || p.key.value === true)
+    (p) => (0, import_yaml2.isScalar)(p.key) && (p.key.value === "on" || p.key.value === true)
   );
   root.items.splice(onIndex >= 0 ? onIndex + 1 : root.items.length, 0, pair);
   return [`GHA003 ${wf.file}: added permissions: { contents: read }; grant more per job if a job needs it`];
@@ -7853,134 +8974,34 @@ function fix(wf) {
   return { source: wf.doc.toString({ lineWidth: 0, flowCollectionPadding: false }), fixed };
 }
 
-// src/workflow.ts
-var import_yaml2 = __toESM(require_dist(), 1);
-function lineOf(lines, node) {
-  const offset = node?.range?.[0];
-  return offset === void 0 ? 1 : lines.linePos(offset).line;
-}
-function asStringMap(value) {
-  const out = {};
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    for (const [k, v] of Object.entries(value)) {
-      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = String(v);
-    }
-  }
-  return out;
-}
-function stringList(value) {
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.filter((v) => typeof v === "string");
-  if (value && typeof value === "object") {
-    const labels = value.labels;
-    if (labels !== void 0) return stringList(labels);
-  }
-  return [];
-}
-function parseSteps(lines, seq) {
-  if (!(0, import_yaml2.isSeq)(seq)) return [];
-  const steps = [];
-  for (const item of seq.items) {
-    if (!(0, import_yaml2.isMap)(item)) continue;
-    const plain = item.toJSON();
-    const step = {
-      node: item,
-      line: lineOf(lines, item),
-      with: asStringMap(plain.with),
-      env: asStringMap(plain.env)
-    };
-    if (typeof plain.uses === "string") step.uses = plain.uses;
-    if (typeof plain.run === "string") step.run = plain.run;
-    if (typeof plain.shell === "string") step.shell = plain.shell;
-    steps.push(step);
-  }
-  return steps;
-}
-function triggersOf(on) {
-  if (typeof on === "string") return [on];
-  if (Array.isArray(on)) return on.filter((t) => typeof t === "string");
-  if (on && typeof on === "object") return Object.keys(on);
-  return [];
-}
-function parseWorkflow(file, source) {
-  const lines = new import_yaml2.LineCounter();
-  const doc = (0, import_yaml2.parseDocument)(source, { lineCounter: lines, keepSourceTokens: true });
-  if (doc.errors.length > 0) {
-    throw new Error(`${file}: ${doc.errors[0]?.message ?? "invalid YAML"}`);
-  }
-  const root = doc.contents;
-  if (!(0, import_yaml2.isMap)(root)) return null;
-  const plain = root.toJSON();
-  const runs = root.get("runs", true);
-  if ((0, import_yaml2.isMap)(runs) && runs.get("using") === "composite") {
-    return {
-      file,
-      kind: "action",
-      doc,
-      lines,
-      triggers: [],
-      hasPermissions: true,
-      // actions inherit the caller's permissions
-      permissions: void 0,
-      env: {},
-      jobs: [
-        {
-          id: "(composite)",
-          node: runs,
-          line: lineOf(lines, runs),
-          hasPermissions: true,
-          permissions: void 0,
-          runsOn: [],
-          secretsInherit: false,
-          steps: parseSteps(lines, runs.get("steps", true))
-        }
-      ]
-    };
-  }
-  const jobsNode = root.get("jobs", true);
-  if (!(0, import_yaml2.isMap)(jobsNode)) return null;
-  const jobs = [];
-  for (const pair of jobsNode.items) {
-    if (!(0, import_yaml2.isScalar)(pair.key) || !(0, import_yaml2.isMap)(pair.value)) continue;
-    const node = pair.value;
-    const job = node.toJSON();
-    const parsed = {
-      id: String(pair.key.value),
-      node,
-      line: lineOf(lines, pair.key),
-      hasPermissions: node.has("permissions"),
-      permissions: job.permissions,
-      runsOn: stringList(job["runs-on"]),
-      secretsInherit: job.secrets === "inherit",
-      steps: parseSteps(lines, node.get("steps", true))
-    };
-    if (typeof job.uses === "string") parsed.uses = job.uses;
-    jobs.push(parsed);
-  }
-  return {
-    file,
-    kind: "workflow",
-    doc,
-    lines,
-    // "on" can be parsed as the boolean true by YAML 1.1 tools; yaml 2 keeps it as a string.
-    triggers: triggersOf(plain.on ?? plain.true),
-    hasPermissions: root.has("permissions"),
-    permissions: plain.permissions,
-    env: asStringMap(plain.env),
-    jobs
-  };
-}
-
 // src/run.ts
+function load(file, source, findings) {
+  try {
+    return parseWorkflow(file, source);
+  } catch (err) {
+    if (!(err instanceof WorkflowParseError)) throw err;
+    findings.push({
+      ruleId: "GHA000",
+      severity: "low",
+      file,
+      line: err.line,
+      message: `could not parse the file, so it was not checked: ${err.reason}`,
+      help: "Fix the YAML error; GitHub rejects the workflow as well."
+    });
+    return null;
+  }
+}
 async function scan(paths, opts) {
   const result = { findings: [], files: 0, fixed: [] };
+  const parsed = [];
   for (const p of paths) {
     for (const file of await findFiles(p)) {
       const rel = path2.relative(opts.cwd, file).split(path2.sep).join("/") || file;
       const source = await readFile(file, "utf8");
-      let wf = parseWorkflow(rel, source);
+      const before = result.findings.length;
+      let wf = load(rel, source, result.findings);
+      if (wf || result.findings.length > before) result.files++;
       if (!wf) continue;
-      result.files++;
       if (opts.fix) {
         const r = fix(wf);
         if (r.source !== null) {
@@ -7990,14 +9011,22 @@ async function scan(paths, opts) {
           if (!wf) continue;
         }
       }
-      result.findings.push(...analyze(wf));
+      parsed.push(wf);
     }
+  }
+  const byDir = /* @__PURE__ */ new Map();
+  for (const wf of parsed) {
+    const dir = path2.posix.dirname(wf.file);
+    byDir.set(dir, [...byDir.get(dir) ?? [], wf]);
+  }
+  for (const wf of parsed) {
+    result.findings.push(...analyze(wf, { workflows: byDir.get(path2.posix.dirname(wf.file)) ?? [wf] }));
   }
   return result;
 }
 
 // src/cli.ts
-var version = true ? "0.1.2" : "dev";
+var version = true ? "0.2.0" : "dev";
 var usage = `usage: gha-guard [options] [path ...]
 
 Lints GitHub Actions workflows and composite actions for security problems.
