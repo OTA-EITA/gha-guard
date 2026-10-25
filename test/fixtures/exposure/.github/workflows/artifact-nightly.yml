@@ -1,0 +1,13 @@
+on:
+  workflow_run:
+    workflows: [Nightly]
+    types: [completed]
+permissions: {}
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh run download ${{ github.event.workflow_run.id }} -n meta
+      - id: read
+        run: echo "v=$(cat meta/v)" >> "$GITHUB_OUTPUT"
+      - run: echo "${{ steps.read.outputs.v }}"

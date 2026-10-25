@@ -1,0 +1,50 @@
+on:
+  workflow_run:
+    workflows: ["PR CI"]
+    types: [completed]
+permissions: {}
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      repo: ${{ steps.read.outputs.repo }}
+      sha: ${{ steps.read.outputs.sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - id: read
+        run: |
+          echo "repo=$(cat meta/repo)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(cat meta/sha)" >> "$GITHUB_OUTPUT"
+  context:
+    needs: meta
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ steps.set.outputs.REPO }}
+    steps:
+      - id: set
+        env:
+          REPO: ${{ needs.meta.outputs.repo || github.repository }}
+        run: echo "REPO=$REPO" >> "$GITHUB_OUTPUT"
+  e2e:
+    needs: [meta, context]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.context.outputs.repository }}
+          ref: ${{ needs.meta.outputs.sha }}
+      - run: npm ci
+  same-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-here
+      - id: r
+        run: echo "v=$(cat built-here/v)" >> "$GITHUB_OUTPUT"
+      - run: echo "${{ steps.r.outputs.v }}"

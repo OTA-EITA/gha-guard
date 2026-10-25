@@ -1,0 +1,34 @@
+on:
+  workflow_run:
+    workflows: ["PR CI"]
+    types: [completed]
+permissions: {}
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ fromJSON(steps.parse.outputs.result).pr_number }}
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const all = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: context.payload.workflow_run.id });
+            const zip = await github.rest.actions.downloadArtifact({ ...context.repo, artifact_id: all.data.artifacts[0].id, archive_format: "zip" });
+            require("fs").writeFileSync("context.zip", Buffer.from(zip.data));
+      - run: unzip context.zip
+      - uses: actions/github-script@v7
+        id: parse
+        with:
+          script: return JSON.parse(require("fs").readFileSync("context.json"))
+  comment:
+    needs: download
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pull_number = ${{ needs.download.outputs.pr }};
+      - run: echo "PR ${{ needs.download.outputs.pr }}"
+      - env:
+          PR: ${{ needs.download.outputs.pr }}
+        run: echo "$PR"
