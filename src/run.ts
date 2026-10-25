@@ -4,7 +4,26 @@ import { findFiles } from "./files.js";
 import { fix } from "./fix.js";
 import { analyze } from "./rules/index.js";
 import type { Finding } from "./types.js";
-import { parseWorkflow } from "./workflow.js";
+import { parseWorkflow, WorkflowParseError } from "./workflow.js";
+import type { Workflow } from "./workflow.js";
+
+/** Parses a file, turning a YAML error into a GHA000 finding instead of stopping the scan. */
+function load(file: string, source: string, findings: Finding[]): Workflow | null {
+  try {
+    return parseWorkflow(file, source);
+  } catch (err) {
+    if (!(err instanceof WorkflowParseError)) throw err;
+    findings.push({
+      ruleId: "GHA000",
+      severity: "low",
+      file,
+      line: err.line,
+      message: `could not parse the file, so it was not checked: ${err.reason}`,
+      help: "Fix the YAML error; GitHub rejects the workflow as well.",
+    });
+    return null;
+  }
+}
 
 export interface RunResult {
   findings: Finding[];
@@ -19,9 +38,10 @@ export async function scan(paths: string[], opts: { fix: boolean; cwd: string })
     for (const file of await findFiles(p)) {
       const rel = path.relative(opts.cwd, file).split(path.sep).join("/") || file;
       const source = await readFile(file, "utf8");
-      let wf = parseWorkflow(rel, source);
+      const before = result.findings.length;
+      let wf = load(rel, source, result.findings);
+      if (wf || result.findings.length > before) result.files++;
       if (!wf) continue;
-      result.files++;
       if (opts.fix) {
         const r = fix(wf);
         if (r.source !== null) {
