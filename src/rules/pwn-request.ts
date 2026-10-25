@@ -49,7 +49,7 @@ function untrustedCheckout(job: Job, step: Step, taint: Taint): Checkout | undef
         branch: false,
         events: ["workflow_run"],
         what: `the ref given by ${tainted.ref}`,
-        why: `; ${tainted.ref} comes from ${tainted.chain}, so the pull request behind the triggering run chooses what is checked out`,
+        why: `; ${tainted.ref} comes from ${tainted.chain}, so whoever started that run (for example a fork pull request) chooses what is checked out`,
       };
     }
     if (untrustedRef.test(ref) || repo.includes("github.event.pull_request.head.repo")) {
