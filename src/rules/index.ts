@@ -9,6 +9,12 @@ import { checkPwnRequest } from "./pwn-request.js";
 
 export const rules: Rule[] = [
   {
+    id: "GHA000",
+    severity: "low",
+    title: "Unparsable file",
+    description: "The file is not valid YAML, so it was skipped; the other files are still checked.",
+  },
+  {
     id: "GHA001",
     severity: "high",
     title: "Script injection",
