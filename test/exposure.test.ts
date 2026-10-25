@@ -104,6 +104,20 @@ describe("GHA002 exposure", () => {
     expect(message("pwn-comment-branch.yml", 18)).toContain("TheModdingInquisition/actions-team-membership");
   });
 
+  it("ignores fetches that never reach the working tree and refs the event does not set", () => {
+    expect(summary("pwn-not-checkout.yml", "GHA002")).toEqual([]);
+  });
+
+  it("treats workflow_dispatch inputs as empty for other events and honours actor checks in scripts", () => {
+    expect(summary("pwn-inputs.yml", "GHA002")).toEqual(["28:high", "20:low"]);
+    expect(message("pwn-inputs.yml", 20)).toContain("Check user authorization");
+    expect(message("pwn-inputs.yml", 28)).toContain("once the label is present");
+  });
+
+  it("uses the right article for the event", () => {
+    expect(message("pwn-comment.yml", 11)).toContain("in an issue_comment workflow");
+  });
+
   it("follows workflow_run to its upstream workflows", () => {
     expect(summary("pwn-workflow-run.yml", "GHA002")).toEqual(["10:medium", "18:low"]);
     expect(message("pwn-workflow-run.yml", 10)).toContain(
