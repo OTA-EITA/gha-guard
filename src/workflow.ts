@@ -108,7 +108,8 @@ export function parseWorkflow(file: string, source: string): Workflow | null {
   const error = doc.errors[0];
   if (error) {
     // The first line of the message is enough; the rest is a source excerpt.
-    const reason = error.message.split("\n")[0] ?? "invalid YAML";
+    const reason =
+      (error.message.split("\n")[0] ?? "").replace(/ at line \d+, column \d+:?$/, "") || "invalid YAML";
     throw new WorkflowParseError(file, error.linePos?.[0].line ?? 1, reason);
   }
   const root = doc.contents;
