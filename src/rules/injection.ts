@@ -2,6 +2,7 @@ import { eventsSetting, scenarios } from "../events.js";
 import { exposures, rateScript, settingEvents } from "../exposure.js";
 import type { Context } from "../exposure.js";
 import type { Finding, Severity } from "../types.js";
+import { artifactTaint } from "../taint.js";
 import { positionIn } from "../workflow.js";
 import type { Step, Workflow } from "../workflow.js";
 
@@ -76,9 +77,28 @@ export function scripts(step: Step): Script[] {
 export function checkInjection(wf: Workflow, ctx: Context): Finding[] {
   const findings: Finding[] = [];
   const events = scenarios(wf);
+  const taint = artifactTaint(wf);
   for (const job of wf.jobs) {
     job.steps.forEach((step, index) => {
       for (const { text, node, fixable } of scripts(step)) {
+        // Values read from artifacts of the triggering run (workflow_run).
+        const seenTaint = new Map<string, number>();
+        for (const m of text.matchAll(expressionRE)) {
+          const hit = taint.find(m[1] ?? "", job);
+          const n = seenTaint.get(m[0]) ?? 0;
+          seenTaint.set(m[0], n + 1);
+          if (!hit) continue;
+          const rating = rateScript(wf, job, index, ["workflow_run"], ctx);
+          if (!rating) continue;
+          findings.push({
+            ruleId: "GHA001",
+            severity: rating.severity,
+            file: wf.file,
+            ...positionIn(wf, node, m[0], n),
+            message: `${hit.ref} is interpolated into a script; it comes from ${hit.chain}, which the pull request behind the triggering run can write, so a crafted value can run arbitrary commands${rating.note}`,
+            help: "Pass it through an environment variable and validate it (e.g. that a pull request number is numeric) before using it.",
+          });
+        }
         const seen = new Map<string, number>();
         for (const inj of findInjections(text)) {
           const n = seen.get(inj.text) ?? 0;
