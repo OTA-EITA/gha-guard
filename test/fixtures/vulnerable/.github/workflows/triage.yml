@@ -19,3 +19,4 @@ jobs:
           script: |
             console.log("${{ github.event.issue.body }}")
       - uses: some-org/labeler@main
+      - run: npm test
