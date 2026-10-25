@@ -84,7 +84,9 @@ export function checkInjection(wf: Workflow, ctx: Context): Finding[] {
         // Values read from artifacts of the triggering run (workflow_run).
         const seenTaint = new Map<string, number>();
         for (const m of text.matchAll(expressionRE)) {
-          const hit = taint.find(m[1] ?? "", job);
+          // In JavaScript, toJSON() yields a string literal the value cannot break out of.
+          const safe = !fixable && /^tojson\s*\(/i.test(m[1] ?? "");
+          const hit = safe ? undefined : taint.find(m[1] ?? "", job);
           const n = seenTaint.get(m[0]) ?? 0;
           seenTaint.set(m[0], n + 1);
           if (!hit) continue;
