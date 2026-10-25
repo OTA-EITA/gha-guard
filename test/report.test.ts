@@ -9,6 +9,7 @@ const findings: Finding[] = [
     severity: "high",
     file: ".github/workflows/a.yml",
     line: 7,
+    column: 5,
     message: "bad | input",
     help: "use env",
     fixable: true,
@@ -20,7 +21,7 @@ const opts = { files: 1, rules, version: "1.2.3" };
 describe("render", () => {
   it("text", () => {
     const out = render(findings, "text", opts);
-    expect(out).toContain(".github/workflows/a.yml:7  HIGH   GHA001  bad | input [fixable]");
+    expect(out).toContain(".github/workflows/a.yml:7:5  HIGH   GHA001  bad | input [fixable]");
     expect(out).toContain("1 file(s), 2 finding(s): 1 high, 0 medium, 1 low");
     expect(render([], "text", opts)).toContain("No problems found.");
   });
@@ -43,7 +44,10 @@ describe("render", () => {
       version: string;
       runs: {
         tool: { driver: { version: string; rules: unknown[] } };
-        results: { level: string; locations: { physicalLocation: { region: { startLine: number } } }[] }[];
+        results: {
+          level: string;
+          locations: { physicalLocation: { region: { startLine: number; startColumn?: number } } }[];
+        }[];
       }[];
     };
     const run = out.runs[0];
@@ -51,6 +55,7 @@ describe("render", () => {
     expect(run?.tool.driver.version).toBe("1.2.3");
     expect(run?.tool.driver.rules).toHaveLength(rules.length);
     expect(run?.results[0]?.level).toBe("error");
-    expect(run?.results[0]?.locations[0]?.physicalLocation.region.startLine).toBe(7);
+    expect(run?.results[0]?.locations[0]?.physicalLocation.region).toEqual({ startLine: 7, startColumn: 5 });
+    expect(run?.results[1]?.locations[0]?.physicalLocation.region).toEqual({ startLine: 3 });
   });
 });
