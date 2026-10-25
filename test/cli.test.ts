@@ -41,6 +41,15 @@ describe("cli", () => {
     );
   });
 
+  it("looks up workflow_run upstreams among the scanned workflows of the same directory", async () => {
+    const dir = path.join(fixtures, "exposure/.github/workflows");
+    const all = await cli(["--fail-on", "none", path.join(fixtures, "exposure")]);
+    expect(all.stdout).toContain("exposure/.github/workflows/pwn-workflow-run.yml:10  MEDIUM GHA002");
+    // Scanned alone, the upstream is unknown, so the finding stays high.
+    const alone = await cli(["--fail-on", "none", path.join(dir, "pwn-workflow-run.yml")]);
+    expect(alone.stdout).toContain("pwn-workflow-run.yml:10  HIGH   GHA002");
+  });
+
   it("passes a clean repository", async () => {
     const r = await cli([path.join(fixtures, "clean")]);
     expect(r.code).toBe(0);
