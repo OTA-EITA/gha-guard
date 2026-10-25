@@ -134,6 +134,8 @@ describe("artifact-derived values in workflow_run workflows", () => {
     expect(msg).toContain("needs.download.outputs.pr");
     expect(msg).toContain("listWorkflowRunArtifacts");
     expect(msg).toContain("steps.parse.outputs");
+    // toJSON() makes a JavaScript string literal, which github-script cannot break out of.
+    expect(findings("artifact-injection.yml", "GHA001").map((f) => f.line)).not.toContain(38);
   });
 
   it("flags checkouts of artifact-derived refs that are then run", () => {
