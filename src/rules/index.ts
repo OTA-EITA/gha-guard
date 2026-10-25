@@ -2,6 +2,7 @@ import type { Finding, Rule } from "../types.js";
 import { severityRank } from "../types.js";
 import type { Context } from "../exposure.js";
 import type { Workflow } from "../workflow.js";
+import { checkAgents } from "./agents.js";
 import { checkHygiene } from "./hygiene.js";
 import { checkInjection } from "./injection.js";
 import { checkPermissions } from "./permissions.js";
@@ -69,6 +70,13 @@ export const rules: Rule[] = [
     title: "secrets: inherit",
     description: "Every secret is passed to a reusable workflow.",
   },
+  {
+    id: "GHA010",
+    severity: "high",
+    title: "AI agent open to outsiders",
+    description:
+      "An AI agent action (claude-code-action, codex-action) accepts users without write access on events outsiders trigger.",
+  },
 ];
 
 const checks: ((wf: Workflow, ctx: Context) => Finding[])[] = [
@@ -77,6 +85,7 @@ const checks: ((wf: Workflow, ctx: Context) => Finding[])[] = [
   checkPermissions,
   checkPinning,
   checkHygiene,
+  checkAgents,
 ];
 
 /** Drops repeats of the same problem on the same line, keeping the first (leftmost) one. */
