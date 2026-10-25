@@ -1,3 +1,4 @@
+import { anyEvent } from "./events.js";
 import { conditionText, parseExpression } from "./expr.js";
 import type { Expr } from "./expr.js";
 import type { Job, Step, Workflow } from "./workflow.js";
@@ -121,6 +122,7 @@ function equals(path: string, other: Expr, scope: Scope): Value {
   const value = literal(other);
   const otherPath = refPath(other);
   if (path === "github.event_name" && typeof value === "string") {
+    if (scope.event === anyEvent) return UNKNOWN;
     return value.toLowerCase() === scope.event ? TRUE : FALSE;
   }
   if (associationRE.test(path) && typeof value === "string") {
@@ -176,6 +178,7 @@ function compare(e: Extract<Expr, { type: "binary" }>, scope: Scope): Value {
     for (const [a, b] of sides) {
       const path = refPath(a);
       if (path === "github.event_name" && typeof literal(b) === "string") {
+        if (scope.event === anyEvent) return UNKNOWN;
         return String(literal(b)).toLowerCase() === scope.event ? FALSE : TRUE;
       }
       if (path && forkRE.test(path) && literal(b) === true) {
@@ -207,6 +210,7 @@ function call(e: Extract<Expr, { type: "call" }>, scope: Scope): Value {
     return gate("actor", `${path} is one of ${items.join(", ")}`);
   }
   if (path === "github.event_name") {
+    if (scope.event === anyEvent) return UNKNOWN;
     return items.some((i) => i.toLowerCase() === scope.event) ? TRUE : FALSE;
   }
   return UNKNOWN;
@@ -345,7 +349,7 @@ function jobValue(wf: Workflow, job: Job, event: string, seen: Set<string>): Val
   return value;
 }
 
-/** Whether a job can run for `event` (e.g. "pull_request_target"), and what gates it. */
+/** Whether a job can run for `event` (e.g. "pull_request_target", or "*" for any), and what gates it. */
 export function jobVerdict(wf: Workflow, job: Job, event: string): Verdict {
   return toVerdict(jobValue(wf, job, event, new Set()));
 }
