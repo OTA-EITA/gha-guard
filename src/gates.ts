@@ -68,6 +68,8 @@ const trustedRunEvents = new Set([
   "pull_request_target",
 ]);
 
+const inputEvents = new Set(["workflow_dispatch", "workflow_call", anyEvent]);
+
 const associationRE = /^github\.event\.[\w.]*author_association$/;
 const actorRE =
   /^github\.(actor|triggering_actor|event\.sender\.login|event\.[\w]+\.user\.login|event\.[\w]+\.author\.login)$/;
@@ -221,6 +223,8 @@ function evaluate(e: Expr, scope: Scope): Value {
     case "literal":
       return e.value === false || e.value === null || e.value === "" || e.value === 0 ? FALSE : TRUE;
     case "ref": {
+      // Only workflow_dispatch and workflow_call have inputs; elsewhere they are empty.
+      if (/^(github\.event\.)?inputs\./.test(e.path) && !inputEvents.has(scope.event)) return FALSE;
       const check = checkRef(e.path, scope);
       return check ? gate("actor", check) : UNKNOWN;
     }
@@ -283,6 +287,8 @@ const failingCheckActionRE =
   /^(lannonbr\/repo-permission-check-action|prince-chrismc\/check-actor-permissions-action|sushichop\/action-repository-permission)@/i;
 const checkScriptRE =
   /getCollaboratorPermissionLevel|collaborators\/[^\s'"]+\/permission|checkMembershipForUser|getMembershipForUserInOrg|\/teams\/[^\s'"]+\/memberships\/|orgs\/[^\s'"]+\/members\//;
+const actorCompareRE =
+  /(?:\$\{\{\s*github\.(?:actor|triggering_actor)\s*\}\}|\$\{?GITHUB_(?:TRIGGERING_)?ACTOR\}?)["']?\s*(?:!=|==|=~|=)\s|(?:!=|==|=~|=)\s*["']?(?:\$\{\{\s*github\.(?:actor|triggering_actor)\s*\}\}|\$\{?GITHUB_(?:TRIGGERING_)?ACTOR\}?)/;
 const failRE = /setFailed|\bexit\s+1\b|\bthrow\b|process\.exit\(\s*1\s*\)/;
 
 function stepLabel(step: Step): string {
@@ -298,6 +304,10 @@ export function permissionCheck(step: Step): { fails: boolean; label: string } |
   }
   if (script !== undefined && checkScriptRE.test(script)) {
     return { fails: failRE.test(script), label: stepLabel(step) };
+  }
+  // A shell allowlist: if [[ "${{ github.actor }}" != "$ALLOWED" ]]; then exit 1; fi
+  if (step.run !== undefined && actorCompareRE.test(step.run) && failRE.test(step.run)) {
+    return { fails: true, label: stepLabel(step) };
   }
   return undefined;
 }
