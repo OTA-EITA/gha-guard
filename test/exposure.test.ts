@@ -61,3 +61,54 @@ describe("GHA001 exposure", () => {
     expect(summary("inj-label.yml", "GHA001")).toEqual(["10:medium"]);
   });
 });
+
+describe("GHA002 exposure", () => {
+  const message = (name: string, line: number) =>
+    findings(name, "GHA002").find((f) => f.line === line)?.message ?? "";
+
+  it("is high only when a later step runs the checked-out code", () => {
+    expect(summary("pwn-exec.yml", "GHA002")).toEqual(["7:high", "14:high", "21:low"]);
+    expect(message("pwn-exec.yml", 7)).toContain("npm ci");
+    expect(message("pwn-exec.yml", 14)).toContain("./.github/actions/setup");
+    expect(message("pwn-exec.yml", 21)).toContain("doesn't appear to execute it");
+  });
+
+  it("downgrades same-repository gates and environments", () => {
+    expect(summary("pwn-gated.yml", "GHA002")).toEqual(["16:medium", "8:low"]);
+    expect(message("pwn-gated.yml", 8)).toContain("the pull request comes from this repository, not a fork");
+    expect(message("pwn-gated.yml", 16)).toContain(
+      "requires approval only if the environment has required reviewers",
+    );
+  });
+
+  it("trusts a maintainer's label only for the labelled commit", () => {
+    expect(summary("pwn-label-event.yml", "GHA002")).toEqual(["18:high", "10:medium"]);
+    expect(message("pwn-label-event.yml", 10)).toContain("a maintainer adds the 'safe to test' label");
+    expect(message("pwn-label-event.yml", 18)).toContain("commits pushed after");
+  });
+
+  it("flags label checks that later events can pass (TOCTOU)", () => {
+    expect(summary("pwn-label-state.yml", "GHA002")).toEqual(["16:high"]);
+    expect(message("pwn-label-state.yml", 16)).toContain(
+      "any later label event runs newer commits once the label is present",
+    );
+    expect(summary("pwn-label-opened.yml", "GHA002")).toEqual(["10:medium"]);
+  });
+
+  it("detects pull request checkouts in issue_comment workflows", () => {
+    expect(summary("pwn-comment.yml", "GHA002")).toEqual(["11:high", "19:low", "28:low"]);
+    expect(message("pwn-comment.yml", 11)).toContain("issue_comment");
+    expect(message("pwn-comment.yml", 11)).toContain("npm install");
+    expect(message("pwn-comment.yml", 19)).toContain("author_association is MEMBER");
+    expect(summary("pwn-comment-branch.yml", "GHA002")).toEqual(["29:high", "18:low"]);
+    expect(message("pwn-comment-branch.yml", 18)).toContain("TheModdingInquisition/actions-team-membership");
+  });
+
+  it("follows workflow_run to its upstream workflows", () => {
+    expect(summary("pwn-workflow-run.yml", "GHA002")).toEqual(["10:medium", "18:low"]);
+    expect(message("pwn-workflow-run.yml", 10)).toContain(
+      "a pull request can add a workflow with the same name",
+    );
+    expect(summary("pwn-workflow-run-pr.yml", "GHA002")).toEqual(["10:high"]);
+  });
+});
