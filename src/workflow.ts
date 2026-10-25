@@ -89,12 +89,27 @@ function triggersOf(on: unknown): string[] {
   return [];
 }
 
+/** A YAML file that could not be parsed; `line` is where the parser stopped. */
+export class WorkflowParseError extends Error {
+  constructor(
+    readonly file: string,
+    readonly line: number,
+    readonly reason: string,
+  ) {
+    super(`${file}: ${reason}`);
+    this.name = "WorkflowParseError";
+  }
+}
+
 /** Parses a workflow or composite action. Returns null for other YAML files. */
 export function parseWorkflow(file: string, source: string): Workflow | null {
   const lines = new LineCounter();
   const doc = parseDocument(source, { lineCounter: lines, keepSourceTokens: true });
-  if (doc.errors.length > 0) {
-    throw new Error(`${file}: ${doc.errors[0]?.message ?? "invalid YAML"}`);
+  const error = doc.errors[0];
+  if (error) {
+    // The first line of the message is enough; the rest is a source excerpt.
+    const reason = error.message.split("\n")[0] ?? "invalid YAML";
+    throw new WorkflowParseError(file, error.linePos?.[0].line ?? 1, reason);
   }
   const root = doc.contents;
   if (!isMap(root)) return null;
