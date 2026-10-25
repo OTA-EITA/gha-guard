@@ -1,0 +1,13 @@
+on: issues
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - run: echo "${{ github.event.issue.title }}"
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ false }}
+        run: echo "${{ github.event.issue.title }}"

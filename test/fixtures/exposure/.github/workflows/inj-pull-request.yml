@@ -1,0 +1,9 @@
+on:
+  pull_request:
+  pull_request_review:
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.head_ref }}"

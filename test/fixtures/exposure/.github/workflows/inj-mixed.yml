@@ -1,0 +1,11 @@
+on:
+  pull_request:
+  issues:
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "${{ github.event.issue.title }}"
+          echo "${{ github.head_ref }}"

@@ -1,0 +1,8 @@
+on: issues
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "${{ github.event.issue.title }}"

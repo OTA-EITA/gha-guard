@@ -1,0 +1,10 @@
+on:
+  pull_request_target:
+    types: [labeled]
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'safe to test'
+    steps:
+      - run: echo "${{ github.event.pull_request.title }}"

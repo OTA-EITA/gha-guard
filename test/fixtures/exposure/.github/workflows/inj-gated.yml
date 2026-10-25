@@ -1,0 +1,8 @@
+on: issue_comment
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: github.event.comment.author_association == 'MEMBER'
+    steps:
+      - run: echo "${{ github.event.comment.body }}"
