@@ -7,6 +7,8 @@ export interface Finding {
   severity: Severity;
   file: string;
   line: number;
+  /** 1-based column, when the finding points into a line (e.g. at an expression). */
+  column?: number;
   message: string;
   /** How to fix it by hand; set when no automatic fix exists. */
   help?: string;
