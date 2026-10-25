@@ -97,7 +97,7 @@ export function checkInjection(wf: Workflow, ctx: Context): Finding[] {
             severity: rating.severity,
             file: wf.file,
             ...positionIn(wf, node, m[0], n),
-            message: `${hit.ref} is interpolated into a script; it comes from ${hit.chain}, which the pull request behind the triggering run can write, so a crafted value can run arbitrary commands${rating.note}`,
+            message: `${hit.ref} is interpolated into a script; it comes from ${hit.chain}, which whoever started that run (for example a fork pull request) can write, so a crafted value can run arbitrary commands${rating.note}`,
             help: "Pass it through an environment variable and validate it (e.g. that a pull request number is numeric) before using it.",
           });
         }
