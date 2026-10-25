@@ -5,6 +5,10 @@ import type { Document, Node, YAMLMap } from "yaml";
 export interface Step {
   node: YAMLMap;
   line: number;
+  id?: string;
+  name?: string;
+  /** The raw `if:` value (a string or a YAML boolean). */
+  if?: unknown;
   uses?: string;
   run?: string;
   shell?: string;
@@ -16,6 +20,12 @@ export interface Job {
   id: string;
   node: YAMLMap;
   line: number;
+  /** The raw `if:` value (a string or a YAML boolean). */
+  if?: unknown;
+  needs: string[];
+  outputs: Record<string, string>;
+  /** True when the job names a deployment environment. */
+  environment: boolean;
   hasPermissions: boolean;
   permissions: unknown;
   runsOn: string[];
@@ -31,7 +41,10 @@ export interface Workflow {
   source: string;
   doc: Document;
   lines: LineCounter;
+  name?: string;
   triggers: string[];
+  /** Per-trigger configuration, e.g. on.pull_request_target.types. */
+  on: Record<string, unknown>;
   hasPermissions: boolean;
   permissions: unknown;
   env: Record<string, string>;
@@ -99,6 +112,9 @@ function parseSteps(lines: LineCounter, seq: unknown): Step[] {
       with: asStringMap(plain.with),
       env: asStringMap(plain.env),
     };
+    if (typeof plain.id === "string") step.id = plain.id;
+    if (typeof plain.name === "string") step.name = plain.name;
+    if (plain.if !== undefined) step.if = plain.if;
     if (typeof plain.uses === "string") step.uses = plain.uses;
     if (typeof plain.run === "string") step.run = plain.run;
     if (typeof plain.shell === "string") step.shell = plain.shell;
@@ -112,6 +128,10 @@ function triggersOf(on: unknown): string[] {
   if (Array.isArray(on)) return on.filter((t): t is string => typeof t === "string");
   if (on && typeof on === "object") return Object.keys(on);
   return [];
+}
+
+function triggerConfig(on: unknown): Record<string, unknown> {
+  return on && typeof on === "object" && !Array.isArray(on) ? (on as Record<string, unknown>) : {};
 }
 
 /** A YAML file that could not be parsed; `line` is where the parser stopped. */
@@ -151,6 +171,7 @@ export function parseWorkflow(file: string, source: string): Workflow | null {
       doc,
       lines,
       triggers: [],
+      on: {},
       hasPermissions: true, // actions inherit the caller's permissions
       permissions: undefined,
       env: {},
@@ -159,6 +180,9 @@ export function parseWorkflow(file: string, source: string): Workflow | null {
           id: "(composite)",
           node: runs,
           line: lineOf(lines, runs),
+          needs: [],
+          outputs: {},
+          environment: false,
           hasPermissions: true,
           permissions: undefined,
           runsOn: [],
@@ -180,26 +204,34 @@ export function parseWorkflow(file: string, source: string): Workflow | null {
       id: String(pair.key.value),
       node,
       line: lineOf(lines, pair.key),
+      needs: stringList(job.needs),
+      outputs: asStringMap(job.outputs),
+      environment: job.environment !== undefined && job.environment !== null && job.environment !== "",
       hasPermissions: node.has("permissions"),
       permissions: job.permissions,
       runsOn: stringList(job["runs-on"]),
       secretsInherit: job.secrets === "inherit",
       steps: parseSteps(lines, node.get("steps", true)),
     };
+    if (job.if !== undefined) parsed.if = job.if;
     if (typeof job.uses === "string") parsed.uses = job.uses;
     jobs.push(parsed);
   }
-  return {
+  // "on" can be parsed as the boolean true by YAML 1.1 tools; yaml 2 keeps it as a string.
+  const on = plain.on ?? plain.true;
+  const wf: Workflow = {
     file,
     kind: "workflow",
     source,
     doc,
     lines,
-    // "on" can be parsed as the boolean true by YAML 1.1 tools; yaml 2 keeps it as a string.
-    triggers: triggersOf(plain.on ?? plain.true),
+    triggers: triggersOf(on),
+    on: triggerConfig(on),
     hasPermissions: root.has("permissions"),
     permissions: plain.permissions,
     env: asStringMap(plain.env),
     jobs,
   };
+  if (typeof plain.name === "string") wf.name = plain.name;
+  return wf;
 }
