@@ -34,7 +34,7 @@ async function run(): Promise<void> {
   for (const f of result.findings) {
     const level = f.severity === "high" ? "error" : f.severity === "medium" ? "warning" : "notice";
     process.stdout.write(
-      `::${level} file=${f.file},line=${String(f.line)},title=${f.ruleId}::${f.message}\n`,
+      `::${level} file=${f.file},line=${String(f.line)}${f.column === undefined ? "" : `,col=${String(f.column)}`},title=${f.ruleId}::${f.message}\n`,
     );
   }
   if (
