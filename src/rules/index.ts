@@ -72,9 +72,23 @@ export const rules: Rule[] = [
 
 const checks = [checkInjection, checkPwnRequest, checkPermissions, checkPinning, checkHygiene];
 
+/** Drops repeats of the same problem on the same line, keeping the first (leftmost) one. */
+function dedupe(findings: Finding[]): Finding[] {
+  const seen = new Set<string>();
+  return findings.filter((f) => {
+    const key = [f.ruleId, f.file, String(f.line), f.message].join("\0");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** Runs every rule and sorts findings by severity, then position. */
 export function analyze(wf: Workflow): Finding[] {
-  return checks
-    .flatMap((check) => check(wf))
-    .sort((a, b) => severityRank[b.severity] - severityRank[a.severity] || a.line - b.line);
+  return dedupe(checks.flatMap((check) => check(wf))).sort(
+    (a, b) =>
+      severityRank[b.severity] - severityRank[a.severity] ||
+      a.line - b.line ||
+      (a.column ?? 0) - (b.column ?? 0),
+  );
 }
