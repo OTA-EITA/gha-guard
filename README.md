@@ -36,6 +36,24 @@ CI/CD はサプライチェーン攻撃の主要な入口です。たとえば�
 
 判定の根拠は GitHub 公式の「Security hardening for GitHub Actions」です。ワークフロー（`.github/workflows/*.yml`）に加えて、Composite Action（`action.yml`）も検査します。
 
+### Rules
+
+| ID     | Severity            | What it finds                                                                                                                                                                                     | Auto-fix                                                           |
+| ------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| GHA000 | low                 | A file that could not be parsed as YAML (duplicate keys, for example). Other files are still checked                                                                                              |                                                                    |
+| GHA001 | high / medium / low | **Attacker-controlled values** (issue / PR titles and bodies, branch names, commit messages, artifact contents received in `workflow_run`) expanded directly in `run:` or `actions/github-script` | ✅ Rewrites them to go through environment variables               |
+| GHA002 | high / medium / low | Checking out and running PR code (including refs read from artifacts) in `pull_request_target` / `workflow_run` / `issue_comment` (pwn request)                                                   |                                                                    |
+| GHA003 | medium              | No `permissions`, so the job runs with the repository default (read-write on older settings)                                                                                                      | ✅ Adds `contents: read`                                           |
+| GHA004 | high                | `permissions: write-all`                                                                                                                                                                          |                                                                    |
+| GHA005 | medium / low        | Actions referenced by a mutable ref such as a tag (medium for third-party actions)                                                                                                                | Pin with [depbot](https://github.com/OTA-EITA/depbot) `--pin-only` |
+| GHA006 | low                 | `actions/checkout` leaving the token in `.git/config` (no `persist-credentials: false`)                                                                                                           |                                                                    |
+| GHA007 | high                | `ACTIONS_ALLOW_UNSECURE_COMMANDS` turning the dangerous old commands back on                                                                                                                      |                                                                    |
+| GHA008 | medium              | PRs running on self-hosted runners                                                                                                                                                                |                                                                    |
+| GHA009 | low                 | Reusable workflows called with `secrets: inherit`, passing every secret                                                                                                                           |                                                                    |
+| GHA010 | high / medium / low | AI agents (`anthropics/claude-code-action` `allowed_non_write_users`, `openai/codex-action` `allow-users`) usable by people without write access on events outsiders can trigger                  |                                                                    |
+
+Severity depends on whether an outsider can actually reach the step: gha-guard reads job and step `if:` conditions per trigger (trusted-only conditions, labels, `environment:`, fork PRs with read-only tokens) and explains the reason in each finding.
+
 ### 重大度の決め方（GHA001 / GHA002 / GHA010）
 
 同じ書き方でも、外部の人が実際に届くかどうかで危険度は大きく変わります。gha-guard はジョブとステップの `if:` を式として読み、トリガーごとに「外部の人が通れるか」を判定して重大度を決め、理由をメッセージに書きます。
